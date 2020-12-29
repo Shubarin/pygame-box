@@ -17,26 +17,28 @@ pygame.time.set_timer(BOMBGENERATE, 1000)  # интервал сброса ко�
 
 
 # загрузка игры
-def load_image(name: str, colorkey: int = None) -> pygame.Surface:
+def load_image(name: str, color_key: int = None) -> pygame.Surface:
     """
     Принимает на входе имя файла и необязательны параметр наличия фона.
         Преобразует файл в объект pygame.image, и удаляет фоновый цвет
     :param name: str
-    :param colorkey: int
+    :param color_key: int
     :return image: pygame.Surface
     """
+    fullname = os.path.join('data', name)
     try:
-        fullname = os.path.join('data', name)
         image = pygame.image.load(fullname).convert()
-        if colorkey is not None:
-            if colorkey == -1:
-                colorkey = image.get_at((0, 0))
-            image.set_colorkey(colorkey)
-        else:
-            image = image.convert_alpha()
-        return image
-    except Exception:
-        terminate()
+    except pygame.error as message:
+        print('Cannot load image:', name)
+        raise SystemExit(message)
+
+    if color_key is not None:
+        if color_key == -1:
+            color_key = image.get_at((0, 0))
+        image.set_colorkey(color_key)
+    else:
+        image = image.convert_alpha()
+    return image
 
 
 all_sprites = pygame.sprite.Group()
@@ -107,7 +109,6 @@ class Player(pygame.sprite.Sprite):
     Класс отвечает за настройку и состояние главного героя.
         Атрибуты:
             :param: image: pygame.Surface
-            :param: mask
             :param: rect: pygame.sprite.Sprite.rect
             :param: v: int
             :param: gravity: float
@@ -116,19 +117,82 @@ class Player(pygame.sprite.Sprite):
             :param: jump: float
     """
 
-    def __init__(self):
+    def __init__(self, sheet, columns, rows, x, y):
         super().__init__(player_group, all_sprites)
-        self.image: pygame.Surface = player_image
-        self.mask = self.image.get_masks()
-        self.rect = self.image.get_rect().move(
+        self.frames = []
+        self.cut_sheet(sheet, columns, rows)
+        self.cur_frame = 0
+        self.count_animate = 4
+        self.image: pygame.Surface = self.frames[self.cur_frame]
+        self.rect = self.rect.move(
             screen.get_rect().centerx - self.image.get_width() // 2,
-            screen.get_rect().bottom - self.image.get_height() - 30
-        )
+            screen.get_rect().bottom - self.image.get_height() - constants.DOWN_BORDER)
+        # self.rect = self.image.get_rect().move(
+        #     screen.get_rect().centerx - self.image.get_width() // 2,
+        #     screen.get_rect().bottom - self.image.get_height() - 30
+        # )
         self.v: int = 1  # скорость
         self.gravity: float = constants.GRAVITY
         self.is_flip: bool = False
         self.is_in_air: bool = False  # статус прыжка
         self.jump: float = 1.5 * constants.tile_height
+
+    def cut_sheet(self, sheet, columns, rows):
+        self.rect = pygame.Rect(0, 0, sheet.get_width() // columns,
+                                sheet.get_height() // rows)
+        for j in range(rows):
+            for i in range(columns):
+                frame_location = (self.rect.w * i, self.rect.h * j)
+                self.frames.append(
+                    pygame.transform.scale(
+                        sheet.subsurface(pygame.Rect(
+                            frame_location, self.rect.size)
+                        ),
+                        (constants.tile_width, constants.tile_height)
+                    )
+                )
+
+    def move(self, keys: [bool]) -> None:
+        """
+        Управляет перемещением героя по полю
+        :param keys: [bool]
+        :return:
+        """
+        if keys[pygame.K_LEFT]:
+            if self.is_flip:
+                self.image = pygame.transform.flip(self.image, True, False)
+            if self.is_can_move_left():
+                self.rect.x -= constants.STEP
+        if keys[pygame.K_RIGHT]:
+            if not self.is_flip:
+                self.image = pygame.transform.flip(self.image, True, False)
+            if self.is_can_move_right():
+                self.rect.x += constants.STEP
+        if keys[pygame.K_UP]:
+            if self.is_can_jump():
+                self.rect.y -= self.jump
+                self.is_in_air = True
+
+    def is_can_jump(self) -> bool:
+        """
+        Проверяет возможность прыгнуть вверх
+        :return: bool
+        """
+        return self.rect.top - self.jump > 0 and not self.is_in_air
+
+    def is_can_move_left(self) -> bool:
+        """
+        Проверяет возможность пойти налево
+        :return: bool
+        """
+        return self.rect.left >= 0
+
+    def is_can_move_right(self) -> bool:
+        """
+        Проверяет возможность пойти направо
+        :return: bool
+        """
+        return self.rect.right < constants.SCREEN_WIDTH
 
     def update(self, *args, **kwargs) -> None:
         """
@@ -137,8 +201,12 @@ class Player(pygame.sprite.Sprite):
         :param kwargs:
         :return:
         """
+        self.cur_frame = (self.rect.x * constants.COLUMNS * 4 // constants.SCREEN_WIDTH) % len(self.frames)
+        self.image = self.frames[self.cur_frame]
+        self.rect.width = constants.tile_width
+        self.rect.height = constants.tile_height
         if args:
-            pass
+            self.move(args[0])
         if self.rect.colliderect(constants.screen_rect) and \
                 not pygame.sprite.spritecollideany(self, tiles_group):
             self.v += self.gravity
@@ -185,13 +253,13 @@ class Tile(pygame.sprite.Sprite):
                 if self in game.board[row]:
                     return
                 c, r = self.get_coords()
-                if game.board[r][c] == 0:
-                    self.rect.y = constants.tile_height * r + \
-                                  constants.DOWN_BORDER + \
-                                  (constants.ROWS - r) * 2
-                    self.rect.x = constants.tile_width * c
-                    game.board[r][c] = self
-                break
+                try:
+                    if game.board[r][c] == 0:
+                        game.board[r][c] = self
+                    break
+                except IndexError as e:
+                    # При вылете за границы смотрим в чем проблема
+                    print(e, (r, c), constants.ROWS, constants.COLUMNS)
 
     def get_coords(self) -> [int, int]:
         """
@@ -216,7 +284,7 @@ class Game:
     """
 
     def __init__(self):
-        self.player = Player()
+        self.player = Player(load_image("dragon.png"), 8, 2, 50, 50)
         self.board: List[List[Union[int, Tile]]] = [[0] * constants.COLUMNS
                                                     for _ in
                                                     range(constants.ROWS)]
@@ -258,6 +326,7 @@ class Game:
             line = []
             for tile in self.board[r]:
                 if tile:
+                    # TODO: высота зависит от constant.screen_rect...
                     tile.rect.y = constants.tile_height * r - \
                                   constants.DOWN_BORDER
                 line.append(tile)
