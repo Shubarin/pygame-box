@@ -13,7 +13,7 @@ clock = pygame.time.Clock()
 screen: pygame.Surface = pygame.display.set_mode(constants.SIZE)
 pygame.key.set_repeat(200, 70)
 BOMBGENERATE: pygame.event = pygame.USEREVENT + 1
-pygame.time.set_timer(BOMBGENERATE, 1000)  # интервал сброса коробочек
+pygame.time.set_timer(BOMBGENERATE, 3000)  # интервал сброса коробочек
 
 
 # загрузка игры
@@ -44,6 +44,7 @@ def load_image(name: str, color_key: int = None) -> pygame.Surface:
 all_sprites = pygame.sprite.Group()
 tiles_group = pygame.sprite.Group()
 player_group = pygame.sprite.Group()
+gameover_group = pygame.sprite.Group()
 
 tile_images: dict = {'box': load_image('box.png')}
 player_image: pygame.Surface = load_image('mario.png')
@@ -136,6 +137,7 @@ class Player(pygame.sprite.Sprite):
         self.is_flip: bool = False
         self.is_in_air: bool = False  # статус прыжка
         self.jump: float = 1.5 * constants.tile_height
+        self.is_collide_left: bool = False
 
     def cut_sheet(self, sheet, columns, rows):
         self.rect = pygame.Rect(0, 0, sheet.get_width() // columns,
@@ -238,6 +240,8 @@ class Tile(pygame.sprite.Sprite):
         self.col: int = pos_x
         self.v: int = 5
         self.setup_collide()
+        self.can_move_left: bool = True
+        self.can_move_right: bool = True
 
     def move(self, keys: [bool]) -> None:
         hits = pygame.sprite.spritecollide(self, all_sprites, False)
@@ -271,12 +275,14 @@ class Tile(pygame.sprite.Sprite):
                     self.is_hero_collide_top = True
                 else:
                     self.is_collide_top = True
+            self.can_move_left = self.is_can_move_left()
+            self.can_move_right = self.is_can_move_right()
 
 
-        if keys[pygame.K_LEFT] and self.is_can_move_left():
+        if keys[pygame.K_LEFT] and self.can_move_left:
             self.rect.x -= constants.STEP
 
-        if keys[pygame.K_RIGHT] and self.is_can_move_right():
+        if keys[pygame.K_RIGHT] and self.can_move_right:
             self.rect.x += constants.STEP
 
     def is_can_move_left(self) -> bool:
@@ -314,6 +320,8 @@ class Tile(pygame.sprite.Sprite):
         :param kwargs:
         :return:
         """
+        self.can_move_left = self.is_can_move_left()
+        self.can_move_right = self.is_can_move_right()
         if args:
             self.move(args[0])
         if self.rect.colliderect(constants.screen_rect) and len(
@@ -372,14 +380,15 @@ class Game:
             if all(row):
                 self.delete_row(i)
 
-    def check_game_over(self, *args, **kwargs) -> None:
+    def check_game_over(self, *args, **kwargs) -> bool:
         """
         Проверка состояния игры на окончание
         :param args:
         :param kwargs:
         :return:
         """
-        pass
+        # TODO: исправить проверку на точную
+        return any(self.board[1])
 
     def delete_row(self, row: int) -> None:
         """
@@ -426,7 +435,23 @@ class Game:
         player_group.draw(screen)
         all_sprites.update(keys)
         self.check_line()
-        self.check_game_over()
+
+
+class GameOver(pygame.sprite.Sprite):
+    image = load_image("gameover.png")
+
+    def __init__(self, group):
+        super().__init__(group)
+        self.image = GameOver.image
+        self.rect = self.image.get_rect()
+        self.rect.x = -self.image.get_width()
+        self.rect.y = constants.SCREEN_HEIGHT // 2 - self.image.get_height() // 2
+        self.speed = 5
+
+    def update(self, *args):
+        if self.rect.x + self.image.get_width() >= constants.SCREEN_WIDTH:
+            self.speed = 0
+        self.rect.x += self.speed
 
 
 # начинаем игру стартовым экраном
@@ -439,6 +464,7 @@ keys = pygame.key.get_pressed()
 # тестовая первая линия
 # for i in range(7):
 #     Tile('box', i)
+is_game_over = False
 if __name__ == '__main__':
     while True:
         generation = False
@@ -448,13 +474,20 @@ if __name__ == '__main__':
             if event.type == BOMBGENERATE:
                 generation = True
             keys = pygame.key.get_pressed()
-        if generation:
+        if generation and not is_game_over:
             col = randrange(constants.COLUMNS)
             while game.board[3][col]:
-                game.check_game_over()
+                is_game_over = game.check_game_over()
+                if is_game_over:
+                    gameover = GameOver(gameover_group)
+                    running = False
                 col = randrange(constants.COLUMNS)
             Tile('box', col)
             # count -= 1
-        game.draw(keys)
+        if not is_game_over:
+            game.draw(keys)
+        else:
+            gameover_group.draw(screen)
+            gameover_group.update()
         pygame.display.flip()
         clock.tick(constants.FPS)
