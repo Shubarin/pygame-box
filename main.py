@@ -262,6 +262,16 @@ class Tile(pygame.sprite.Sprite):
                     self.is_hero_collide_left = True
                 else:
                     self.is_collide_left = True
+            # Проверка что есть объект сверху
+            if obj.rect.right > self.rect.left and \
+                    obj.rect.left < self.rect.right and \
+                    obj.rect.bottom <= self.rect.top + constants.ERROR_RATE and \
+                    obj.rect.top <= self.rect.bottom + constants.ERROR_RATE:
+                if isinstance(obj, Player):
+                    self.is_hero_collide_top = True
+                else:
+                    self.is_collide_top = True
+
 
         if keys[pygame.K_LEFT] and self.is_can_move_left():
             self.rect.x -= constants.STEP
@@ -425,7 +435,10 @@ start_screen()
 game = Game()
 keys = pygame.key.get_pressed()
 # временный счетчик генерируемых коробок
-count = 1
+# count = 2
+# тестовая первая линия
+# for i in range(7):
+#     Tile('box', i)
 if __name__ == '__main__':
     while True:
         generation = False
@@ -435,13 +448,13 @@ if __name__ == '__main__':
             if event.type == BOMBGENERATE:
                 generation = True
             keys = pygame.key.get_pressed()
-        if generation and count:
+        if generation:
             col = randrange(constants.COLUMNS)
             while game.board[3][col]:
                 game.check_game_over()
                 col = randrange(constants.COLUMNS)
-            Tile('box', 4)
-            count -= 1
+            Tile('box', col)
+            # count -= 1
         game.draw(keys)
         pygame.display.flip()
         clock.tick(constants.FPS)
