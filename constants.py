@@ -7,3 +7,4 @@ FPS = 30
 STEP = 5
 DOWN_BORDER = 30
 screen_rect = (0, 0, SCREEN_WIDTH, SCREEN_HEIGHT - tile_height - DOWN_BORDER)
+ERROR_RATE = 1

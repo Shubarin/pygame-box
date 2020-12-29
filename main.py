@@ -237,6 +237,65 @@ class Tile(pygame.sprite.Sprite):
                                                screen.get_rect().top)
         self.col: int = pos_x
         self.v: int = 5
+        self.setup_collide()
+
+    def move(self, keys: [bool]) -> None:
+        hits = pygame.sprite.spritecollide(self, all_sprites, False)
+        for obj in hits:
+            if obj == self:
+                continue
+            # Проверка что есть объект справа
+            if obj.rect.left < self.rect.right and \
+                    obj.rect.left > self.rect.left and \
+                    obj.rect.bottom - self.rect.top <= constants.tile_height + constants.ERROR_RATE and \
+                    self.rect.bottom - obj.rect.top <= constants.tile_height + constants.ERROR_RATE:
+                if isinstance(obj, Player):
+                    self.is_hero_collide_right = True
+                else:
+                    self.is_collide_right = True
+            # Проверка что есть объект слева
+            if obj.rect.right > self.rect.left and \
+                    obj.rect.left < self.rect.left and \
+                    obj.rect.bottom - self.rect.top <= constants.tile_height + constants.ERROR_RATE and \
+                    self.rect.bottom - obj.rect.top <= constants.tile_height + constants.ERROR_RATE:
+                if isinstance(obj, Player):
+                    self.is_hero_collide_left = True
+                else:
+                    self.is_collide_left = True
+
+        if keys[pygame.K_LEFT] and self.is_can_move_left():
+            self.rect.x -= constants.STEP
+
+        if keys[pygame.K_RIGHT] and self.is_can_move_right():
+            self.rect.x += constants.STEP
+
+    def is_can_move_left(self) -> bool:
+        is_can = (
+                self.rect.x > 0 and
+                not self.is_collide_left and
+                not self.is_collide_top and
+                self.is_hero_collide_right
+        )
+        return is_can
+
+    def is_can_move_right(self) -> bool:
+        is_can = (
+                self.rect.right < constants.SCREEN_WIDTH and
+                not self.is_collide_right and
+                not self.is_collide_top and
+                self.is_hero_collide_left
+        )
+        return is_can
+
+    def setup_collide(self):
+        self.is_collide_left: bool = False
+        self.is_collide_right: bool = False
+        self.is_collide_top: bool = False
+        self.is_collide_bottom: bool = False
+        self.is_hero_collide_right: bool = False
+        self.is_hero_collide_left: bool = False
+        self.is_hero_collide_top: bool = False
+        self.is_hero_collide_bottom: bool = False
 
     def update(self, *args, **kwargs) -> None:
         """
@@ -245,6 +304,8 @@ class Tile(pygame.sprite.Sprite):
         :param kwargs:
         :return:
         """
+        if args:
+            self.move(args[0])
         if self.rect.colliderect(constants.screen_rect) and len(
                 pygame.sprite.spritecollide(self, tiles_group, False)) == 1:
             self.rect.y += self.v
@@ -260,6 +321,7 @@ class Tile(pygame.sprite.Sprite):
                 except IndexError as e:
                     # При вылете за границы смотрим в чем проблема
                     print(e, (r, c), constants.ROWS, constants.COLUMNS)
+        self.setup_collide()
 
     def get_coords(self) -> [int, int]:
         """
@@ -348,10 +410,11 @@ class Game:
                                      (constants.SCREEN_WIDTH,
                                       constants.SCREEN_HEIGHT))
         screen.blit(fon, (0, 0))
-        player_group.update(keys)
+        # tiles_group.update(keys)
+        # player_group.update(keys)
         tiles_group.draw(screen)
         player_group.draw(screen)
-        all_sprites.update()
+        all_sprites.update(keys)
         self.check_line()
         self.check_game_over()
 
@@ -361,6 +424,8 @@ start_screen()
 # создаём игровое окружение
 game = Game()
 keys = pygame.key.get_pressed()
+# временный счетчик генерируемых коробок
+count = 1
 if __name__ == '__main__':
     while True:
         generation = False
@@ -370,12 +435,13 @@ if __name__ == '__main__':
             if event.type == BOMBGENERATE:
                 generation = True
             keys = pygame.key.get_pressed()
-        if generation:
+        if generation and count:
             col = randrange(constants.COLUMNS)
             while game.board[3][col]:
                 game.check_game_over()
                 col = randrange(constants.COLUMNS)
-            Tile('box', col)
+            Tile('box', 4)
+            count -= 1
         game.draw(keys)
         pygame.display.flip()
         clock.tick(constants.FPS)
