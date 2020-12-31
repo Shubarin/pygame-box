@@ -1,6 +1,7 @@
 import os
 import sys
-from random import randrange
+from copy import copy
+from random import randrange, choice
 from typing import Union, List
 
 import pygame
@@ -8,15 +9,33 @@ import pygame
 import constants
 
 # инициализация констант
+pygame.mixer.init()
+main_theme = pygame.mixer.Sound("data/main_theme.ogg")
+channel = main_theme.play().pause()
 pygame.init()
 clock = pygame.time.Clock()
 screen: pygame.Surface = pygame.display.set_mode(constants.SIZE)
+screen_game_over: pygame.Surface = pygame.display.set_mode(constants.SIZE)
 pygame.key.set_repeat(200, 70)
 BOMBGENERATE: pygame.event = pygame.USEREVENT + 1
-pygame.time.set_timer(BOMBGENERATE, 3000)  # интервал сброса коробочек
+pygame.time.set_timer(BOMBGENERATE, 1500)  # интервал сброса коробочек
 
 
-# загрузка игры
+# Генерация частиц
+def create_particles(position: [int, int]) -> None:
+    """
+    Генератор частиц, срабатывает при попадании коробки в героя
+    :param position: [int, int]
+    :return:
+    """
+    particle_count = 20
+    # возможные скорости
+    numbers = range(-5, 6)
+    for _ in range(particle_count):
+        Particle(position, choice(numbers), choice(numbers))
+
+
+# загрузка изображений
 def load_image(name: str, color_key: int = None) -> pygame.Surface:
     """
     Принимает на входе имя файла и необязательны параметр наличия фона.
@@ -25,11 +44,14 @@ def load_image(name: str, color_key: int = None) -> pygame.Surface:
     :param color_key: int
     :return image: pygame.Surface
     """
-    fullname = os.path.join('data', name)
+    fullname: str = os.path.join('data', name)
     try:
         image = pygame.image.load(fullname).convert()
     except pygame.error as message:
         print('Cannot load image:', name)
+        raise SystemExit(message)
+    except FileNotFoundError as message:
+        print('Cannot found file:', name)
         raise SystemExit(message)
 
     if color_key is not None:
@@ -42,12 +64,12 @@ def load_image(name: str, color_key: int = None) -> pygame.Surface:
 
 
 all_sprites = pygame.sprite.Group()
+gameover_group = pygame.sprite.Group()
+game_status = pygame.sprite.Group()
 tiles_group = pygame.sprite.Group()
 player_group = pygame.sprite.Group()
-gameover_group = pygame.sprite.Group()
 
 tile_images: dict = {'box': load_image('box.png')}
-player_image: pygame.Surface = load_image('mario.png')
 
 
 # выход из программы
@@ -104,11 +126,138 @@ def start_screen() -> None:
         clock.tick(constants.FPS)
 
 
+# класс игры
+class Game:
+    """
+    Класс отвечающий за состояние игры.
+        Атрибуты:
+            :param: player: Player
+            :param: board: List[List[Union[int, Tile]]]
+            :param: game_over_screen: GameOver
+            :param: health_status: List[StatusHearts]
+            :param: is_paused: bool
+        Методы:
+            check_line - проверяет нет ли на поле полностью заполненных линий
+            delete_row - проводит удаление строки со смещением всех объектов
+            check_game_over - проверяет окончание игры
+    """
+
+    def __init__(self):
+        self.player: Player = Player(load_image("dragon.png"), 8, 2, 50, 50)
+        self.board: List[List[Union[int, Tile]]] = [[0] * constants.COLUMNS
+                                                    for _ in
+                                                    range(constants.ROWS)]
+        self.game_over_screen: GameOver = GameOver(gameover_group)
+        self.health_status: List[StatusHearts] = [StatusHearts() for _ in
+                                                  range(self.player.health)]
+        self.score_status: StatusScore = StatusScore()
+        self.score: int = 0
+        self.is_paused: bool = False
+        for i, obj in enumerate(self.health_status):
+            obj.rect.x = obj.rect.width * i * 0.5
+
+    def check_line(self, *args, **kwargs) -> None:
+        """
+        Если в строке все элементы заполнены, то строка удаляется
+        :param args:
+        :param kwargs:
+        :return:
+        """
+        for i, row in enumerate(self.board):
+            if all(row):
+                self.delete_row(i)
+
+    def delete_row(self, row: int) -> None:
+        """
+        Принимает номер строки, которую нужно удалить.
+            Перед удалением строки, все элементы удаляются из групп спрайтов
+        :param row:int
+        :return:
+        """
+        for i in range(constants.COLUMNS):
+            self.board[row][i].kill()
+            self.board[row][i] = 0
+        del self.board[row]
+        self.score += constants.COLUMNS
+        if self.score % 3 == 0:
+            Tile.increase_speed()
+        new_board = []
+        for r in range(constants.ROWS - 1):
+            line = []
+            for tile in self.board[r]:
+                if tile:
+                    tile.rect.y = constants.tile_height * r - constants.DOWN_BORDER
+                line.append(tile)
+            new_board.append(line)
+        # добавляем пустую верхнюю строку
+        new_board.append([0] * constants.COLUMNS)
+        self.board.clear()
+        for r in new_board:
+            self.board.append(r)
+
+    def is_game_over(self, *args, **kwargs) -> bool:
+        """
+        Проверка состояния игры на окончание
+        :param args:
+        :param kwargs:
+        :return:
+        """
+        return any(self.board[1]) or self.player.health == 0
+
+    def paused(self) -> None:
+        self.is_paused = not self.is_paused
+
+    def update(self, keys: [bool] = None, *args, **kwargs) -> None:
+        """
+        Отрисовка игрового мира
+        :parameter
+        :param keys: Sequence [bool
+        :param args:
+        :param kwargs:
+        :return:
+        """
+        if self.is_game_over():
+            gameover_group.draw(screen)
+            gameover_group.update()
+            return
+        fon = pygame.transform.scale(load_image('background.png'),
+                                     (constants.SCREEN_WIDTH,
+                                      constants.SCREEN_HEIGHT))
+        screen.blit(fon, (0, 0))
+        tiles_group.draw(screen)
+        player_group.draw(screen)
+        game_status.draw(screen)
+        if not self.is_paused:
+            game_status.update()
+            all_sprites.update(keys)
+        self.check_line()
+
+
+class GameOver(pygame.sprite.Sprite):
+    def __init__(self, group):
+        super().__init__(group)
+        self.image = load_image("gameover.png")
+        self.image = pygame.transform.scale(self.image, (constants.SCREEN_WIDTH,
+                                                         self.image.get_height()))
+        self.rect = self.image.get_rect()
+        self.rect.x = -self.image.get_width()
+        self.rect.y = constants.SCREEN_HEIGHT // 2 - self.image.get_height() // 2
+        self.speed = 5
+
+    def update(self, *args):
+        if self.rect.x + self.image.get_width() >= constants.SCREEN_WIDTH:
+            self.speed = 0
+        self.rect.x += self.speed
+
+
 # класс главного героя
 class Player(pygame.sprite.Sprite):
     """
     Класс отвечает за настройку и состояние главного героя.
         Атрибуты:
+            :param: count_animate: int
+            :param: cur_frame: int
+            :param: frames: list[pygame.Surface]
             :param: image: pygame.Surface
             :param: rect: pygame.sprite.Sprite.rect
             :param: v: int
@@ -116,28 +265,29 @@ class Player(pygame.sprite.Sprite):
             :param: is_flip: bool
             :param: is_in_air: bool
             :param: jump: float
+            :param: col: int
+            :param: row: int
+            :param: is_in_air: bool
+            :param: health: int
     """
 
     def __init__(self, sheet, columns, rows, x, y):
         super().__init__(player_group, all_sprites)
         self.frames = []
         self.cut_sheet(sheet, columns, rows)
-        self.cur_frame = 0
-        self.count_animate = 4
+        self.cur_frame: int = 0
+        self.count_animate: int = 4  # количество циклов повторений анимации на экран
         self.image: pygame.Surface = self.frames[self.cur_frame]
         self.rect = self.rect.move(
             screen.get_rect().centerx - self.image.get_width() // 2,
             screen.get_rect().bottom - self.image.get_height() - constants.DOWN_BORDER)
-        # self.rect = self.image.get_rect().move(
-        #     screen.get_rect().centerx - self.image.get_width() // 2,
-        #     screen.get_rect().bottom - self.image.get_height() - 30
-        # )
         self.v: int = 1  # скорость
         self.gravity: float = constants.GRAVITY
         self.is_flip: bool = False
         self.is_in_air: bool = False  # статус прыжка
         self.jump: float = 1.5 * constants.tile_height
-        self.is_collide_left: bool = False
+        self.col, self.row = self.get_coords()
+        self.health: int = 10
 
     def cut_sheet(self, sheet, columns, rows):
         self.rect = pygame.Rect(0, 0, sheet.get_width() // columns,
@@ -145,14 +295,47 @@ class Player(pygame.sprite.Sprite):
         for j in range(rows):
             for i in range(columns):
                 frame_location = (self.rect.w * i, self.rect.h * j)
-                self.frames.append(
-                    pygame.transform.scale(
-                        sheet.subsurface(pygame.Rect(
-                            frame_location, self.rect.size)
-                        ),
-                        (constants.tile_width, constants.tile_height)
-                    )
+                frame = pygame.transform.scale(
+                    sheet.subsurface(pygame.Rect(
+                        frame_location, self.rect.size)
+                    ),
+                    (constants.tile_width, constants.tile_height)
                 )
+                self.frames.append(frame)
+
+    def get_coords(self) -> [int, int]:
+        """
+        Возвращает координаты тайла на игровом поле (в клетках: столбец, строка)
+        :return: tuple[int, int]
+        """
+        return self.rect.x * constants.COLUMNS // constants.SCREEN_WIDTH, \
+               self.rect.y * constants.ROWS // constants.SCREEN_HEIGHT
+
+    def is_can_jump(self) -> bool:
+        """
+        Проверяет возможность прыгнуть вверх
+        :return: bool
+        """
+        return self.rect.top - self.jump > 0 and not self.is_in_air
+
+    def is_can_move_left(self) -> bool:
+        """
+        Проверяет возможность пойти налево
+        :return: bool
+        """
+        return self.col >= 0 and self.rect.left >= 0 and not \
+            game.board[self.row][self.col]
+
+    def is_can_move_right(self) -> bool:
+        """
+        Проверяет возможность пойти направо
+        :return: bool
+        """
+        right_col = (self.rect.centerx + self.rect.width // 4) * \
+                    constants.COLUMNS // constants.SCREEN_WIDTH
+        return (self.col + 1 < constants.COLUMNS and
+                self.rect.right < constants.SCREEN_WIDTH and
+                not game.board[self.row][right_col])
 
     def move(self, keys: [bool]) -> None:
         """
@@ -175,27 +358,6 @@ class Player(pygame.sprite.Sprite):
                 self.rect.y -= self.jump
                 self.is_in_air = True
 
-    def is_can_jump(self) -> bool:
-        """
-        Проверяет возможность прыгнуть вверх
-        :return: bool
-        """
-        return self.rect.top - self.jump > 0 and not self.is_in_air
-
-    def is_can_move_left(self) -> bool:
-        """
-        Проверяет возможность пойти налево
-        :return: bool
-        """
-        return self.rect.left >= 0
-
-    def is_can_move_right(self) -> bool:
-        """
-        Проверяет возможность пойти направо
-        :return: bool
-        """
-        return self.rect.right < constants.SCREEN_WIDTH
-
     def update(self, *args, **kwargs) -> None:
         """
         Обновляет состояние главного героя после действий пользователя
@@ -203,19 +365,50 @@ class Player(pygame.sprite.Sprite):
         :param kwargs:
         :return:
         """
-        self.cur_frame = (self.rect.x * constants.COLUMNS * 4 // constants.SCREEN_WIDTH) % len(self.frames)
+        self.cur_frame = (self.rect.x * constants.COLUMNS * 4 //
+                          constants.SCREEN_WIDTH) % len(self.frames)
         self.image = self.frames[self.cur_frame]
         self.rect.width = constants.tile_width
         self.rect.height = constants.tile_height
+        self.col, self.row = self.get_coords()
         if args:
             self.move(args[0])
         if self.rect.colliderect(constants.screen_rect) and \
-                not pygame.sprite.spritecollideany(self, tiles_group):
+                not any([pygame.sprite.collide_mask(self, tile) for tile in
+                         tiles_group]):
             self.v += self.gravity
             self.rect.y += self.v
         else:
             self.v = 1
             self.is_in_air = False
+
+
+class StatusHearts(pygame.sprite.Sprite):
+    def __init__(self):
+        super().__init__(game_status)
+        self.image = load_image("heart.png", color_key=-1)
+        self.image = pygame.transform.scale(self.image, (self.image.get_width(),
+                                                         self.image.get_height()))
+        self.rect = self.image.get_rect()
+
+
+class StatusScore(pygame.sprite.Sprite):
+    def __init__(self):
+        super().__init__(game_status)
+        self.font = pygame.font.Font(None, 40)
+        self.image = self.font.render('Score: ', True, pygame.Color('white'))
+        self.rect = self.image.get_rect()
+        self.rect.right = constants.SCREEN_WIDTH - self.rect.width
+        self.rect.top = 10
+
+    def update(self, *args, **kwargs) -> None:
+        self.image = self.font.render(f'Score: {game.score}', True,
+                                      pygame.Color('white'))
+        self.rect.right = constants.SCREEN_WIDTH - self.rect.width
+
+
+# создаём игровое окружение
+game = Game()
 
 
 # класс тайлов коробочек
@@ -226,7 +419,12 @@ class Tile(pygame.sprite.Sprite):
     :param: rect: pygame.sprite.Sprite.rect
     :param: col: int
     :param: v: int
+    :param: can_move_left: bool
+    :param: can_move_right: bool
+    :param: sprite_copy: pygame.sprite.Sprite
     """
+
+    v: int = 5
 
     def __init__(self, tile_type: str, pos_x: int):
         """
@@ -238,52 +436,32 @@ class Tile(pygame.sprite.Sprite):
         self.rect = self.image.get_rect().move(constants.tile_width * pos_x,
                                                screen.get_rect().top)
         self.col: int = pos_x
-        self.v: int = 5
+        self.row: int = 0
         self.setup_collide()
         self.can_move_left: bool = True
         self.can_move_right: bool = True
+        # копия объекта с увеличенной координатой y, для коррекции пересечений
+        # на разных скоростях с нижними объектами
+        self.sprite_copy: pygame.sprite.Sprite = copy(self)
+        self.sprite_copy.rect.height += self.v
+        self.mask = pygame.mask.from_surface(self.image)
+        self.is_collide_left: bool = False
+        self.is_collide_right: bool = False
+        self.is_collide_top: bool = False
+        self.is_collide_bottom: bool = False
+        self.is_hero_collide_right: bool = False
+        self.is_hero_collide_left: bool = False
+        self.is_hero_collide_top: bool = False
+        self.is_hero_collide_bottom: bool = False
+        self.is_in_air = True
 
-    def move(self, keys: [bool]) -> None:
-        hits = pygame.sprite.spritecollide(self, all_sprites, False)
-        for obj in hits:
-            if obj == self:
-                continue
-            # Проверка что есть объект справа
-            if obj.rect.left < self.rect.right and \
-                    obj.rect.left > self.rect.left and \
-                    obj.rect.bottom - self.rect.top <= constants.tile_height + constants.ERROR_RATE and \
-                    self.rect.bottom - obj.rect.top <= constants.tile_height + constants.ERROR_RATE:
-                if isinstance(obj, Player):
-                    self.is_hero_collide_right = True
-                else:
-                    self.is_collide_right = True
-            # Проверка что есть объект слева
-            if obj.rect.right > self.rect.left and \
-                    obj.rect.left < self.rect.left and \
-                    obj.rect.bottom - self.rect.top <= constants.tile_height + constants.ERROR_RATE and \
-                    self.rect.bottom - obj.rect.top <= constants.tile_height + constants.ERROR_RATE:
-                if isinstance(obj, Player):
-                    self.is_hero_collide_left = True
-                else:
-                    self.is_collide_left = True
-            # Проверка что есть объект сверху
-            if obj.rect.right > self.rect.left and \
-                    obj.rect.left < self.rect.right and \
-                    obj.rect.bottom <= self.rect.top + constants.ERROR_RATE and \
-                    obj.rect.top <= self.rect.bottom + constants.ERROR_RATE:
-                if isinstance(obj, Player):
-                    self.is_hero_collide_top = True
-                else:
-                    self.is_collide_top = True
-            self.can_move_left = self.is_can_move_left()
-            self.can_move_right = self.is_can_move_right()
-
-
-        if keys[pygame.K_LEFT] and self.can_move_left:
-            self.rect.x -= constants.STEP
-
-        if keys[pygame.K_RIGHT] and self.can_move_right:
-            self.rect.x += constants.STEP
+    def get_coords(self) -> [int, int]:
+        """
+        Возвращает координаты тайла на игровом поле (в клетках: столбец, строка)
+        :return: tuple[int, int]
+        """
+        return self.rect.x * constants.COLUMNS // constants.SCREEN_WIDTH, \
+               self.rect.y * constants.ROWS // constants.SCREEN_HEIGHT
 
     def is_can_move_left(self) -> bool:
         is_can = (
@@ -303,6 +481,79 @@ class Tile(pygame.sprite.Sprite):
         )
         return is_can
 
+    def move(self, keys: [bool]) -> None:
+        """
+        Управляет перемещением коробок по полю
+        :param keys: [bool]
+        :return:
+        """
+        hits: list = pygame.sprite.spritecollide(self, all_sprites, False)
+        for obj in hits:
+            if obj == self:
+                continue
+            # Проверка что есть объект справа
+            if self.rect.right > obj.rect.left > self.rect.left and \
+                    obj.rect.bottom - self.rect.top <= (constants.tile_height +
+                                                        constants.ERROR_RATE) and \
+                    self.rect.bottom - obj.rect.top <= (constants.tile_height +
+                                                        constants.ERROR_RATE):
+                if isinstance(obj, Player):
+                    self.is_hero_collide_right = True
+                else:
+                    self.is_collide_right = True
+            # Проверка что есть объект слева
+            if obj.rect.right > self.rect.left > obj.rect.left and \
+                    obj.rect.bottom - self.rect.top <= (constants.tile_height +
+                                                        constants.ERROR_RATE) and \
+                    self.rect.bottom - obj.rect.top <= (constants.tile_height +
+                                                        constants.ERROR_RATE):
+                if isinstance(obj, Player):
+                    self.is_hero_collide_left = True
+                else:
+                    self.is_collide_left = True
+            # Проверка что есть объект сверху
+            if obj.rect.right > self.rect.left and \
+                    obj.rect.left < self.rect.right and \
+                    obj.rect.bottom <= (self.rect.top +
+                                        constants.ERROR_RATE) and \
+                    obj.rect.top <= (self.rect.bottom +
+                                     constants.ERROR_RATE):
+                if isinstance(obj, Player):
+                    self.is_hero_collide_top = True
+                else:
+                    self.is_collide_top = True
+            # Проверка что есть объект снизу
+            if obj.rect.right > self.rect.left and \
+                    obj.rect.left < self.rect.right and \
+                    obj.rect.bottom >= (self.rect.top +
+                                        constants.ERROR_RATE) and \
+                    obj.rect.top <= (self.rect.bottom +
+                                     constants.ERROR_RATE):
+                if not isinstance(obj, Player):
+                    self.is_collide_bottom = True
+
+            # проверяем что не упали на героя
+            if obj.rect.right > self.rect.left and \
+                    obj.rect.left < self.rect.right and \
+                    obj.rect.top < (self.rect.bottom +
+                                    constants.ERROR_RATE) and \
+                    constants.tile_height < obj.rect.top - self.rect.top <= (
+                    constants.tile_height +
+                    constants.ERROR_RATE):
+                self.is_hero_collide_bottom = True
+            self.can_move_left = self.is_can_move_left()
+            self.can_move_right = self.is_can_move_right()
+
+        if keys[pygame.K_LEFT] and self.can_move_left:
+            self.rect.x -= constants.tile_width
+
+        if keys[pygame.K_RIGHT] and self.can_move_right:
+            self.rect.x += constants.tile_width
+
+    @classmethod
+    def increase_speed(cls):
+        cls.v += 1
+
     def setup_collide(self):
         self.is_collide_left: bool = False
         self.is_collide_right: bool = False
@@ -312,6 +563,7 @@ class Tile(pygame.sprite.Sprite):
         self.is_hero_collide_left: bool = False
         self.is_hero_collide_top: bool = False
         self.is_hero_collide_bottom: bool = False
+        self.is_in_air = True
 
     def update(self, *args, **kwargs) -> None:
         """
@@ -324,148 +576,67 @@ class Tile(pygame.sprite.Sprite):
         self.can_move_right = self.is_can_move_right()
         if args:
             self.move(args[0])
-        if self.rect.colliderect(constants.screen_rect) and len(
-                pygame.sprite.spritecollide(self, tiles_group, False)) == 1:
+        # Проверка что не упали на героя
+        if (self.is_hero_collide_bottom and
+                not self.is_hero_collide_left and
+                not self.is_hero_collide_right and
+                not self.is_hero_collide_top and
+                len(pygame.sprite.spritecollide(self, tiles_group, False)) == 1
+        ):
+            game.player.health -= 1
+            if game.board[self.row][self.col]:
+                game.board[self.row][self.col] = 0
+            self.kill()
+            create_particles((self.rect.centerx, self.rect.top))
+            game.health_status.pop().kill()
+        if self.sprite_copy.rect.colliderect(
+                constants.screen_rect) and not self.is_collide_bottom:
             self.rect.y += self.v
         else:
-            for row in range(constants.ROWS - 1, -1, -1):
-                if self in game.board[row]:
-                    return
-                c, r = self.get_coords()
-                try:
-                    if game.board[r][c] == 0:
-                        game.board[r][c] = self
-                    break
-                except IndexError as e:
-                    # При вылете за границы смотрим в чем проблема
-                    print(e, (r, c), constants.ROWS, constants.COLUMNS)
+            new_col, new_row = self.get_coords()
+            try:
+                if game.board[new_row][new_col] == 0:
+                    game.board[new_row][new_col], game.board[self.row][
+                        self.col] = self, 0
+                    self.col, self.row = new_col, new_row
+            except IndexError as e:
+                # При вылете за границы смотрим в чем проблема
+                print(e, (new_row, new_col), constants.ROWS, constants.COLUMNS)
+        self.rect.x = constants.tile_width * self.col
         self.setup_collide()
 
-    def get_coords(self) -> [int, int]:
-        """
-        Возвращает координаты тайла на игровом поле (в клетках: столбец, строка)
-        :return: tuple[int, int]
-        """
-        return self.rect.x * constants.COLUMNS // constants.SCREEN_WIDTH, \
-            self.rect.y * constants.ROWS // constants.SCREEN_HEIGHT
 
+class Particle(pygame.sprite.Sprite):
+    fire = [choice(game.player.frames)]
+    for scale in (5, 10, 20, 30):
+        fire.append(pygame.transform.scale(fire[0], (scale, scale)))
 
-# класс игры
-class Game:
-    """
-    Класс отвечающий за состояние игры.
-        Атрибуты:
-            Player: player
-            list: board
-        Методы:
-            check_line - проверяет нет ли на поле полностью заполненных линий
-            delete_row - проводит удаление строки со смещением всех объектов
-            check_game_over - проверяет окончание игры
-    """
-
-    def __init__(self):
-        self.player = Player(load_image("dragon.png"), 8, 2, 50, 50)
-        self.board: List[List[Union[int, Tile]]] = [[0] * constants.COLUMNS
-                                                    for _ in
-                                                    range(constants.ROWS)]
-
-    def check_line(self, *args, **kwargs) -> None:
-        """
-        Если в строке все элементы заполнены, то строка удаляется
-        :param args:
-        :param kwargs:
-        :return:
-        """
-        for i, row in enumerate(self.board):
-            if all(row):
-                self.delete_row(i)
-
-    def check_game_over(self, *args, **kwargs) -> bool:
-        """
-        Проверка состояния игры на окончание
-        :param args:
-        :param kwargs:
-        :return:
-        """
-        # TODO: исправить проверку на точную
-        return any(self.board[1])
-
-    def delete_row(self, row: int) -> None:
-        """
-        Принимает номер строки, которую нужно удалить.
-            Перед удалением строки, все элементы удаляются из групп спрайтов
-        :param row:int
-        :return:
-        """
-        for i in range(constants.COLUMNS):
-            self.board[row][i].kill()
-            self.board[row][i] = 0
-        del self.board[row]
-        clock.tick(constants.FPS)
-        new_board = [[0] * constants.COLUMNS]
-        for r in range(constants.ROWS - 1):
-            line = []
-            for tile in self.board[r]:
-                if tile:
-                    # TODO: высота зависит от constant.screen_rect...
-                    tile.rect.y = constants.tile_height * r - \
-                                  constants.DOWN_BORDER
-                line.append(tile)
-            new_board.append(line)
-        self.board.clear()
-        for r in new_board:
-            self.board.append(r)
-
-    def draw(self, keys: [bool] = None, *args, **kwargs) -> None:
-        """
-        Отрисовка игрового мира
-        :parameter
-        :param keys: Sequence [bool
-        :param args:
-        :param kwargs:
-        :return:
-        """
-        fon = pygame.transform.scale(load_image('background.png'),
-                                     (constants.SCREEN_WIDTH,
-                                      constants.SCREEN_HEIGHT))
-        screen.blit(fon, (0, 0))
-        # tiles_group.update(keys)
-        # player_group.update(keys)
-        tiles_group.draw(screen)
-        player_group.draw(screen)
-        all_sprites.update(keys)
-        self.check_line()
-
-
-class GameOver(pygame.sprite.Sprite):
-    image = load_image("gameover.png")
-
-    def __init__(self, group):
-        super().__init__(group)
-        self.image = GameOver.image
+    def __init__(self, pos, dx, dy):
+        super().__init__(all_sprites, player_group)
+        self.image = choice(self.fire)
         self.rect = self.image.get_rect()
-        self.rect.x = -self.image.get_width()
-        self.rect.y = constants.SCREEN_HEIGHT // 2 - self.image.get_height() // 2
-        self.speed = 5
+        self.velocity = [dx, dy]
+        self.rect.x, self.rect.y = pos
+        self.gravity = constants.GRAVITY
 
-    def update(self, *args):
-        if self.rect.x + self.image.get_width() >= constants.SCREEN_WIDTH:
-            self.speed = 0
-        self.rect.x += self.speed
+    def update(self, *args, **kwargs):
+        self.velocity[1] += self.gravity
+        self.rect.x += self.velocity[0]
+        self.rect.y += self.velocity[1]
+        if not self.rect.colliderect(constants.screen_rect):
+            self.kill()
 
 
 # начинаем игру стартовым экраном
 start_screen()
-# создаём игровое окружение
-game = Game()
 keys = pygame.key.get_pressed()
 # временный счетчик генерируемых коробок
-# count = 2
+count = 1
 # тестовая первая линия
-# for i in range(7):
+# for i in range(11):
 #     Tile('box', i)
-is_game_over = False
 if __name__ == '__main__':
+    main_theme.play()
     while True:
         generation = False
         for event in pygame.event.get():
@@ -474,20 +645,14 @@ if __name__ == '__main__':
             if event.type == BOMBGENERATE:
                 generation = True
             keys = pygame.key.get_pressed()
-        if generation and not is_game_over:
+            if keys[pygame.K_ESCAPE]:
+                game.paused()
+        if generation and count:
             col = randrange(constants.COLUMNS)
-            while game.board[3][col]:
-                is_game_over = game.check_game_over()
-                if is_game_over:
-                    gameover = GameOver(gameover_group)
-                    running = False
-                col = randrange(constants.COLUMNS)
+            # for i in range(11):
+            #     Tile('box', i)
             Tile('box', col)
             # count -= 1
-        if not is_game_over:
-            game.draw(keys)
-        else:
-            gameover_group.draw(screen)
-            gameover_group.update()
+        game.update(keys)
         pygame.display.flip()
         clock.tick(constants.FPS)
