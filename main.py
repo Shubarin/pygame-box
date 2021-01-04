@@ -38,7 +38,7 @@ exit_button = pygame_gui.elements.UIButton(
 screen_game_over: pygame.Surface = pygame.display.set_mode(constants.SIZE)
 pygame.key.set_repeat(200, 70)
 BOMBGENERATE: pygame.event = pygame.USEREVENT + 1
-pygame.time.set_timer(BOMBGENERATE, 1500)  # интервал сброса коробочек
+pygame.time.set_timer(BOMBGENERATE, constants.BOMBS_INTERVALS)  # интервал сброса коробочек
 
 
 # Генерация частиц
@@ -484,7 +484,7 @@ class Tile(pygame.sprite.Sprite):
     :param: sprite_copy: pygame.sprite.Sprite
     """
 
-    v: int = 5
+    v: int = constants.START_V
 
     def __init__(self, tile_type: str, pos_x: int):
         """
@@ -698,8 +698,6 @@ is_paused = False
 # временный счетчик генерируемых коробок
 count = 1
 # тестовая первая линия
-for i in range(11):
-    Tile(color_box[game.level % len(color_box)], i)
 if __name__ == '__main__':
     main_theme.play(loops=True)
     main_theme.set_volume(0.01)
