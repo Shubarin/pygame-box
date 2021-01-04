@@ -17,28 +17,11 @@ pygame.init()
 clock = pygame.time.Clock()
 screen: pygame.Surface = pygame.display.set_mode(constants.SIZE)
 
-manager: pygame_gui.UIManager = pygame_gui.UIManager(constants.SIZE)
-start_button = pygame_gui.elements.UIButton(
-    relative_rect=pygame.Rect(
-        (constants.SCREEN_WIDTH // 4 - 50, 2.5 * constants.SCREEN_HEIGHT // 4),
-        (100, 50)
-    ),
-    text='Start',
-    manager=manager
-)
-exit_button = pygame_gui.elements.UIButton(
-    relative_rect=pygame.Rect(
-        (constants.SCREEN_WIDTH // 4 - 50, 3.5 * constants.SCREEN_HEIGHT // 4),
-        (100, 50)
-    ),
-    text='Quit',
-    manager=manager
-)
-
 screen_game_over: pygame.Surface = pygame.display.set_mode(constants.SIZE)
 pygame.key.set_repeat(200, 70)
 BOMBGENERATE: pygame.event = pygame.USEREVENT + 1
-pygame.time.set_timer(BOMBGENERATE, constants.BOMBS_INTERVALS)  # интервал сброса коробочек
+CURRENT_BOMB_INTERVAL = constants.BOMBS_INTERVALS
+pygame.time.set_timer(BOMBGENERATE, CURRENT_BOMB_INTERVAL)  # интервал сброса коробочек
 
 
 # Генерация частиц
@@ -111,61 +94,6 @@ def terminate() -> None:
     sys.exit()
 
 
-# игровой цикл стартового экрана
-def start_screen() -> None:
-    """
-    Запускает игровой цикл для отрисовки стартового окна
-    :return:
-    """
-    intro_text: list = [
-        'Коробочки', '',
-        'Правила игры:',
-        'С неба сбрасывают коробки.',
-        'Герой должен расставлять',
-        'их в линию, чтобы не дать',
-        'вырасти столбикам до неба.',
-        'При попадании по персонажу ',
-        'коробкой теряются жизни'
-    ]
-
-    fon: pygame.Surface = pygame.transform.scale(
-        load_image('background-start.jpg'), (
-            constants.SCREEN_WIDTH,
-            constants.SCREEN_HEIGHT
-        )
-    )
-    screen.blit(fon, (0, 0))
-    font = pygame.font.Font(None, 25)
-    text_coord: int = 50
-    for line in intro_text:
-        string_rendered = font.render(line, True, pygame.Color('white'))
-        intro_rect = string_rendered.get_rect()
-        text_coord += 10
-        intro_rect.top = text_coord
-        intro_rect.x = 10
-        text_coord += intro_rect.height
-        screen.blit(string_rendered, intro_rect)
-
-    while True:
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                terminate()
-            if event.type == pygame.USEREVENT:
-                if event.user_type == pygame_gui.UI_BUTTON_PRESSED:
-                    if event.ui_element == start_button:
-                        return
-                    if event.ui_element == exit_button:
-                        terminate()
-            manager.process_events(event)
-            # elif event.type == pygame.KEYDOWN or \
-            #         event.type == pygame.MOUSEBUTTONDOWN:
-            #     return  # начинаем игру
-        manager.update(constants.FPS)
-        manager.draw_ui(screen)
-        pygame.display.flip()
-        clock.tick(constants.FPS)
-
-
 # класс игры
 class Game:
     """
@@ -187,17 +115,18 @@ class Game:
         self.board: List[List[Union[int, Tile]]] = [[0] * constants.COLUMNS
                                                     for _ in
                                                     range(constants.ROWS)]
-        self.game_over_screen: GameOver = GameOver(gameover_group)
         self.health_status: List[StatusHearts] = [StatusHearts() for _ in
                                                   range(self.player.health)]
         self.score_status: StatusScore = StatusScore()
         self.score_level: StatusLevel = StatusLevel()
         self.score: int = 0
         self.level: int = 0
-        self.is_paused: bool = False
         for i, obj in enumerate(self.health_status):
             obj.rect.x = obj.rect.width * i * 0.5
             obj.rect.y = 10
+        self.is_game_over: bool = False
+        self.is_paused: bool = False
+        self.is_start_screen: bool = True
 
     def check_line(self, *args, **kwargs) -> None:
         """
@@ -239,17 +168,267 @@ class Game:
         for r in new_board:
             self.board.append(r)
 
-    def is_game_over(self, *args, **kwargs) -> bool:
+    def check_game_over(self, *args, **kwargs) -> None:
         """
         Проверка состояния игры на окончание
         :param args:
         :param kwargs:
         :return:
         """
-        return any(self.board[1]) or self.player.health == 0
+        self.is_game_over = any(self.board[1]) or not self.player.health
 
-    def paused(self) -> None:
-        self.is_paused = not self.is_paused
+    # игровой цикл стартового экрана
+    def start_screen(self) -> None:
+        """
+        Запускает игровой цикл для отрисовки стартового окна
+        :return:
+        """
+        manager: pygame_gui.UIManager = pygame_gui.UIManager(constants.SIZE)
+        start_button = pygame_gui.elements.UIButton(
+            relative_rect=pygame.Rect(
+                (constants.SCREEN_WIDTH // 4 - 50, 2.5 * constants.SCREEN_HEIGHT // 4),
+                (100, 50)
+            ),
+            text='Start',
+            manager=manager
+        )
+        results_button = pygame_gui.elements.UIButton(
+            relative_rect=pygame.Rect(
+                (constants.SCREEN_WIDTH // 4 - 50, 3 * constants.SCREEN_HEIGHT // 4),
+                (100, 50)
+            ),
+            text='Results',
+            manager=manager
+        )
+        exit_button = pygame_gui.elements.UIButton(
+            relative_rect=pygame.Rect(
+                (constants.SCREEN_WIDTH // 4 - 50, 3.5 * constants.SCREEN_HEIGHT // 4),
+                (100, 50)
+            ),
+            text='Quit',
+            manager=manager
+        )
+        intro_text: list = [
+            'Коробочки', '',
+            'Правила игры:',
+            'С неба сбрасывают коробки.',
+            'Герой должен расставлять',
+            'их в линию, чтобы не дать',
+            'вырасти столбикам до неба.',
+            'При попадании по персонажу ',
+            'коробкой теряются жизни'
+        ]
+
+        fon: pygame.Surface = pygame.transform.scale(
+            load_image('background-start.jpg'), (
+                constants.SCREEN_WIDTH,
+                constants.SCREEN_HEIGHT
+            )
+        )
+        screen.blit(fon, (0, 0))
+        font = pygame.font.Font(None, 25)
+        text_coord: int = 50
+        for line in intro_text:
+            string_rendered = font.render(line, True, pygame.Color('white'))
+            intro_rect = string_rendered.get_rect()
+            text_coord += 10
+            intro_rect.top = text_coord
+            intro_rect.x = 10
+            text_coord += intro_rect.height
+            screen.blit(string_rendered, intro_rect)
+
+        while True:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    terminate()
+                if event.type == pygame.USEREVENT:
+                    if event.user_type == pygame_gui.UI_BUTTON_PRESSED:
+                        if event.ui_element == start_button:
+                            self.is_start_screen = False
+                            return
+                        if event.ui_element == results_button:
+                            # self.is_start_screen = False
+                            return
+                        if event.ui_element == exit_button:
+                            terminate()
+                manager.process_events(event)
+            manager.update(constants.FPS)
+            manager.draw_ui(screen)
+            pygame.display.flip()
+            clock.tick(constants.FPS)
+
+    # игровой цикл экрана паузы
+    def pause_screen(self) -> None:
+        """
+        Запускает игровой цикл для отрисовки стартового окна
+        :return:
+        """
+        manager: pygame_gui.UIManager = pygame_gui.UIManager(constants.SIZE)
+        restart_button = pygame_gui.elements.UIButton(
+            relative_rect=pygame.Rect(
+                (constants.SCREEN_WIDTH // 4 - 50, 2.5 * constants.SCREEN_HEIGHT // 4),
+                (100, 50)
+            ),
+            text='Restart',
+            manager=manager
+        )
+        resume_button = pygame_gui.elements.UIButton(
+            relative_rect=pygame.Rect(
+                (constants.SCREEN_WIDTH // 4 - 50, 3 * constants.SCREEN_HEIGHT // 4),
+                (100, 50)
+            ),
+            text='Resume',
+            manager=manager
+        )
+        exit_button = pygame_gui.elements.UIButton(
+            relative_rect=pygame.Rect(
+                (constants.SCREEN_WIDTH // 4 - 50, 3.5 * constants.SCREEN_HEIGHT // 4),
+                (100, 50)
+            ),
+            text='Quit',
+            manager=manager
+        )
+        intro_text: list = [
+            'Пауза', '',
+            f'Score: {self.score}',
+            f'Осталось жизней: {len(self.health_status)}',
+        ]
+
+        fon: pygame.Surface = pygame.transform.scale(
+            load_image('background-start.jpg'), (
+                constants.SCREEN_WIDTH,
+                constants.SCREEN_HEIGHT
+            )
+        )
+        screen.blit(fon, (0, 0))
+        font = pygame.font.Font(None, 35)
+        text_coord: int = 50
+        for line in intro_text:
+            string_rendered = font.render(line, True, pygame.Color('white'))
+            intro_rect = string_rendered.get_rect()
+            text_coord += 10
+            intro_rect.top = text_coord
+            intro_rect.x = 10
+            text_coord += intro_rect.height
+            screen.blit(string_rendered, intro_rect)
+
+        while True:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    terminate()
+                if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_ESCAPE:
+                        self.is_paused = False
+                        return
+                if event.type == pygame.USEREVENT:
+                    if event.user_type == pygame_gui.UI_BUTTON_PRESSED:
+                        if event.ui_element == restart_button:
+                            self.reset_game()
+                            return
+                        if event.ui_element == resume_button:
+                            self.is_paused = False
+                            return
+                        if event.ui_element == exit_button:
+                            terminate()
+                manager.process_events(event)
+            manager.update(constants.FPS)
+            manager.draw_ui(screen)
+            pygame.display.flip()
+            clock.tick(constants.FPS)
+
+    # игровой цикл экрана конца игры
+    def game_over_screen(self) -> None:
+        """
+        Запускает игровой цикл для отрисовки стартового окна
+        :return:
+        """
+        manager: pygame_gui.UIManager = pygame_gui.UIManager(constants.SIZE)
+        restart_button = pygame_gui.elements.UIButton(
+            relative_rect=pygame.Rect(
+                (constants.SCREEN_WIDTH // 4 - 50, 2.5 * constants.SCREEN_HEIGHT // 4),
+                (100, 50)
+            ),
+            text='Restart',
+            manager=manager
+        )
+        results_button = pygame_gui.elements.UIButton(
+            relative_rect=pygame.Rect(
+                (constants.SCREEN_WIDTH // 4 - 50, 3 * constants.SCREEN_HEIGHT // 4),
+                (100, 50)
+            ),
+            text='Results',
+            manager=manager
+        )
+        exit_button = pygame_gui.elements.UIButton(
+            relative_rect=pygame.Rect(
+                (constants.SCREEN_WIDTH // 4 - 50, 3.5 * constants.SCREEN_HEIGHT // 4),
+                (100, 50)
+            ),
+            text='Quit',
+            manager=manager
+        )
+        intro_text: list = [
+            'Game Over', '',
+            f'Score: {self.score}',
+            f'Осталось жизней: {len(self.health_status)}',
+        ]
+
+        fon: pygame.Surface = pygame.transform.scale(
+            load_image('background-start.jpg'), (
+                constants.SCREEN_WIDTH,
+                constants.SCREEN_HEIGHT
+            )
+        )
+        screen.blit(fon, (0, 0))
+        font = pygame.font.Font(None, 35)
+        text_coord: int = 50
+        for line in intro_text:
+            string_rendered = font.render(line, True, pygame.Color('white'))
+            intro_rect = string_rendered.get_rect()
+            text_coord += 10
+            intro_rect.top = text_coord
+            intro_rect.x = 10
+            text_coord += intro_rect.height
+            screen.blit(string_rendered, intro_rect)
+
+        while True:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    terminate()
+                if event.type == pygame.USEREVENT:
+                    if event.user_type == pygame_gui.UI_BUTTON_PRESSED:
+                        if event.ui_element == restart_button:
+                            self.reset_game()
+                            return
+                        if event.ui_element == results_button:
+                            # TODO: показать результаты
+                            return
+                        if event.ui_element == exit_button:
+                            terminate()
+                manager.process_events(event)
+            manager.update(constants.FPS)
+            manager.draw_ui(screen)
+            pygame.display.flip()
+            clock.tick(constants.FPS)
+
+    def reset_game(self):
+        self.player.kill()
+        self.board: List[List[Union[int, Tile]]] = [[0] * constants.COLUMNS
+                                                    for _ in
+                                                    range(constants.ROWS)]
+        for obj in self.health_status:
+            obj.kill()
+        self.score_status.kill()
+        self.score_level.kill()
+        self.score: int = 0
+        self.level: int = 0
+        for i, obj in enumerate(self.health_status):
+            obj.rect.x = obj.rect.width * i * 0.5
+            obj.rect.y = 10
+        for obj in tiles_group:
+            obj.kill()
+        Tile.reset_v()
+        self.__init__()
 
     def update(self, keys: [bool] = None, *args, **kwargs) -> None:
         """
@@ -260,9 +439,15 @@ class Game:
         :param kwargs:
         :return:
         """
-        if self.is_game_over():
-            gameover_group.draw(screen)
-            gameover_group.update()
+        self.check_game_over()
+        if self.is_game_over:
+            self.game_over_screen()
+            return
+        if self.is_start_screen:
+            self.start_screen()
+            return
+        if self.is_paused:
+            self.pause_screen()
             return
         fon = pygame.transform.scale(load_image('background.png'),
                                      (constants.SCREEN_WIDTH,
@@ -611,8 +796,18 @@ class Tile(pygame.sprite.Sprite):
             self.rect.x += constants.tile_width
 
     @classmethod
+    def reset_v(cls):
+        global CURRENT_BOMB_INTERVAL
+        cls.v = 1
+        CURRENT_BOMB_INTERVAL = constants.BOMBS_INTERVALS
+        pygame.time.set_timer(BOMBGENERATE, CURRENT_BOMB_INTERVAL)
+
+    @classmethod
     def increase_speed(cls):
+        global CURRENT_BOMB_INTERVAL
         cls.v += 1
+        CURRENT_BOMB_INTERVAL -= constants.INSTERVALS_PITCH
+        pygame.time.set_timer(BOMBGENERATE, CURRENT_BOMB_INTERVAL)
         for tile in tiles_group:
             tile.image = load_image(color_box[game.level % len(color_box)])
 
@@ -691,8 +886,6 @@ class Particle(pygame.sprite.Sprite):
             self.kill()
 
 
-# начинаем игру стартовым экраном
-start_screen()
 keys = pygame.key.get_pressed()
 is_paused = False
 # временный счетчик генерируемых коробок
@@ -701,7 +894,6 @@ count = 1
 if __name__ == '__main__':
     main_theme.play(loops=True)
     main_theme.set_volume(0.01)
-    pygame.mouse.set_visible(False)
     while True:
         generation = False
         for event in pygame.event.get():
@@ -711,14 +903,9 @@ if __name__ == '__main__':
                 generation = True
             keys = pygame.key.get_pressed()
             if keys[pygame.K_ESCAPE]:
-                game.paused()
-                if is_paused:
-                    main_theme.play(loops=True)
-                else:
-                    main_theme.stop()
-                is_paused = not is_paused
+                game.is_paused = not game.is_paused
         if generation and count:
-            col = randrange(constants.COLUMNS)
+            col = randrange(1, constants.COLUMNS - 1)
             # for i in range(11):
             #     Tile('box', i)
             Tile(color_box[game.level % len(color_box)], col)
