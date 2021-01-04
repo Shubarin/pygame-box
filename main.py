@@ -1,11 +1,11 @@
 import os
 import sys
-import time
 from copy import copy
 from random import randrange, choice
 from typing import Union, List
 
 import pygame
+import pygame_gui
 
 import constants
 
@@ -16,6 +16,25 @@ channel = main_theme.play().pause()
 pygame.init()
 clock = pygame.time.Clock()
 screen: pygame.Surface = pygame.display.set_mode(constants.SIZE)
+
+manager: pygame_gui.UIManager = pygame_gui.UIManager(constants.SIZE)
+start_button = pygame_gui.elements.UIButton(
+    relative_rect=pygame.Rect(
+        (constants.SCREEN_WIDTH // 4 - 50, 2.5 * constants.SCREEN_HEIGHT // 4),
+        (100, 50)
+    ),
+    text='Start',
+    manager=manager
+)
+exit_button = pygame_gui.elements.UIButton(
+    relative_rect=pygame.Rect(
+        (constants.SCREEN_WIDTH // 4 - 50, 3.5 * constants.SCREEN_HEIGHT // 4),
+        (100, 50)
+    ),
+    text='Quit',
+    manager=manager
+)
+
 screen_game_over: pygame.Surface = pygame.display.set_mode(constants.SIZE)
 pygame.key.set_repeat(200, 70)
 BOMBGENERATE: pygame.event = pygame.USEREVENT + 1
@@ -102,22 +121,24 @@ def start_screen() -> None:
         'Коробочки', '',
         'Правила игры:',
         'С неба сбрасывают коробки.',
-        "Герой должен расставлять их в линию,",
-        'чтобы не дать вырасти столбикам до неба.',
-        'При попадании по персонажу коробкой теряются жизни'
+        'Герой должен расставлять',
+        'их в линию, чтобы не дать',
+        'вырасти столбикам до неба.',
+        'При попадании по персонажу ',
+        'коробкой теряются жизни'
     ]
 
     fon: pygame.Surface = pygame.transform.scale(
-        load_image('background-start.png'), (
+        load_image('background-start.jpg'), (
             constants.SCREEN_WIDTH,
             constants.SCREEN_HEIGHT
         )
     )
     screen.blit(fon, (0, 0))
-    font = pygame.font.Font(None, 30)
+    font = pygame.font.Font(None, 25)
     text_coord: int = 50
     for line in intro_text:
-        string_rendered = font.render(line, True, pygame.Color('black'))
+        string_rendered = font.render(line, True, pygame.Color('white'))
         intro_rect = string_rendered.get_rect()
         text_coord += 10
         intro_rect.top = text_coord
@@ -129,9 +150,18 @@ def start_screen() -> None:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 terminate()
-            elif event.type == pygame.KEYDOWN or \
-                    event.type == pygame.MOUSEBUTTONDOWN:
-                return  # начинаем игру
+            if event.type == pygame.USEREVENT:
+                if event.user_type == pygame_gui.UI_BUTTON_PRESSED:
+                    if event.ui_element == start_button:
+                        return
+                    if event.ui_element == exit_button:
+                        terminate()
+            manager.process_events(event)
+            # elif event.type == pygame.KEYDOWN or \
+            #         event.type == pygame.MOUSEBUTTONDOWN:
+            #     return  # начинаем игру
+        manager.update(constants.FPS)
+        manager.draw_ui(screen)
         pygame.display.flip()
         clock.tick(constants.FPS)
 
@@ -631,7 +661,8 @@ class Tile(pygame.sprite.Sprite):
                     game.board[new_row][new_col], game.board[self.row][
                         self.col] = self, 0
                     self.col, self.row = new_col, new_row
-                    self.rect.y = constants.tile_height * (self.row + 1) - constants.DOWN_BORDER
+                    self.rect.y = constants.tile_height * (
+                            self.row + 1) - constants.DOWN_BORDER
             except IndexError as e:
                 # При вылете за границы смотрим в чем проблема
                 print(e, (new_row, new_col), constants.ROWS, constants.COLUMNS)
