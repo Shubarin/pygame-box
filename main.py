@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 from copy import copy
 from random import randrange, choice
 from typing import Union, List
@@ -70,6 +71,15 @@ tiles_group = pygame.sprite.Group()
 player_group = pygame.sprite.Group()
 
 tile_images: dict = {'box': load_image('box.png')}
+color_box = [
+    'box-black.png',
+    'box-blue.png',
+    'box-cyan.png',
+    'box-green.png',
+    'box-pink.png',
+    'box-red.png',
+    'box-yellow.png'
+]
 
 
 # выход из программы
@@ -151,10 +161,13 @@ class Game:
         self.health_status: List[StatusHearts] = [StatusHearts() for _ in
                                                   range(self.player.health)]
         self.score_status: StatusScore = StatusScore()
+        self.score_level: StatusLevel = StatusLevel()
         self.score: int = 0
+        self.level: int = 0
         self.is_paused: bool = False
         for i, obj in enumerate(self.health_status):
             obj.rect.x = obj.rect.width * i * 0.5
+            obj.rect.y = 10
 
     def check_line(self, *args, **kwargs) -> None:
         """
@@ -179,7 +192,8 @@ class Game:
             self.board[row][i] = 0
         del self.board[row]
         self.score += constants.COLUMNS
-        if self.score % 3 == 0:
+        if self.score % constants.LINE_PER_LEVEL == 0:
+            self.level += 1
             Tile.increase_speed()
         new_board = []
         for r in range(constants.ROWS - 1):
@@ -368,8 +382,9 @@ class Player(pygame.sprite.Sprite):
         self.cur_frame = (self.rect.x * constants.COLUMNS * 4 //
                           constants.SCREEN_WIDTH) % len(self.frames)
         self.image = self.frames[self.cur_frame]
+        self.mask = pygame.mask.from_surface(self.image)
         self.rect.width = constants.tile_width
-        self.rect.height = constants.tile_height
+        self.rect.height = constants.tile_height + self.v
         self.col, self.row = self.get_coords()
         if args:
             self.move(args[0])
@@ -395,16 +410,31 @@ class StatusHearts(pygame.sprite.Sprite):
 class StatusScore(pygame.sprite.Sprite):
     def __init__(self):
         super().__init__(game_status)
-        self.font = pygame.font.Font(None, 40)
+        self.font = pygame.font.Font(None, 30)
         self.image = self.font.render('Score: ', True, pygame.Color('white'))
         self.rect = self.image.get_rect()
         self.rect.right = constants.SCREEN_WIDTH - self.rect.width
-        self.rect.top = 10
+        self.rect.top = 25
 
     def update(self, *args, **kwargs) -> None:
         self.image = self.font.render(f'Score: {game.score}', True,
                                       pygame.Color('white'))
         self.rect.right = constants.SCREEN_WIDTH - self.rect.width
+
+
+class StatusLevel(pygame.sprite.Sprite):
+    def __init__(self):
+        super().__init__(game_status)
+        self.font = pygame.font.Font(None, 30)
+        self.image = self.font.render('Level: ', True, pygame.Color('white'))
+        self.rect = self.image.get_rect()
+        self.rect.right = constants.SCREEN_WIDTH - 3 * self.rect.width
+        self.rect.top = 25
+
+    def update(self, *args, **kwargs) -> None:
+        self.image = self.font.render(f'Level: {game.level}', True,
+                                      pygame.Color('white'))
+        self.rect.right = constants.SCREEN_WIDTH - 3 * self.rect.width
 
 
 # создаём игровое окружение
@@ -432,7 +462,7 @@ class Tile(pygame.sprite.Sprite):
         :param pos_x: int
         """
         super().__init__(tiles_group, all_sprites)
-        self.image: pygame.Surface = tile_images[tile_type]
+        self.image: pygame.Surface = load_image(tile_type)
         self.rect = self.image.get_rect().move(constants.tile_width * pos_x,
                                                screen.get_rect().top)
         self.col: int = pos_x
@@ -553,6 +583,8 @@ class Tile(pygame.sprite.Sprite):
     @classmethod
     def increase_speed(cls):
         cls.v += 1
+        for tile in tiles_group:
+            tile.image = load_image(color_box[game.level % len(color_box)])
 
     def setup_collide(self):
         self.is_collide_left: bool = False
@@ -599,6 +631,7 @@ class Tile(pygame.sprite.Sprite):
                     game.board[new_row][new_col], game.board[self.row][
                         self.col] = self, 0
                     self.col, self.row = new_col, new_row
+                    self.rect.y = constants.tile_height * (self.row + 1) - constants.DOWN_BORDER
             except IndexError as e:
                 # При вылете за границы смотрим в чем проблема
                 print(e, (new_row, new_col), constants.ROWS, constants.COLUMNS)
@@ -630,28 +663,36 @@ class Particle(pygame.sprite.Sprite):
 # начинаем игру стартовым экраном
 start_screen()
 keys = pygame.key.get_pressed()
+is_paused = False
 # временный счетчик генерируемых коробок
 count = 1
 # тестовая первая линия
-# for i in range(11):
-#     Tile('box', i)
+for i in range(11):
+    Tile(color_box[game.level % len(color_box)], i)
 if __name__ == '__main__':
-    main_theme.play()
+    main_theme.play(loops=True)
+    main_theme.set_volume(0.01)
+    pygame.mouse.set_visible(False)
     while True:
         generation = False
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 terminate()
-            if event.type == BOMBGENERATE:
+            if event.type == BOMBGENERATE and not is_paused:
                 generation = True
             keys = pygame.key.get_pressed()
             if keys[pygame.K_ESCAPE]:
                 game.paused()
+                if is_paused:
+                    main_theme.play(loops=True)
+                else:
+                    main_theme.stop()
+                is_paused = not is_paused
         if generation and count:
             col = randrange(constants.COLUMNS)
             # for i in range(11):
             #     Tile('box', i)
-            Tile('box', col)
+            Tile(color_box[game.level % len(color_box)], col)
             # count -= 1
         game.update(keys)
         pygame.display.flip()
