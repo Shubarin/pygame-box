@@ -15,7 +15,17 @@ import inputbox
 pygame.mixer.init()
 main_theme = pygame.mixer.Sound(
     os.path.join(constants.MUSIC_PATH, "main_theme.ogg"))
-channel = main_theme.play().pause()
+jump_sound = pygame.mixer.Sound(
+    os.path.join(constants.MUSIC_PATH, "jump.ogg"))
+jump_sound.set_volume(0.1)
+hit_sound = pygame.mixer.Sound(
+    os.path.join(constants.MUSIC_PATH, "hit.ogg"))
+hit_sound.set_volume(0.1)
+line_sound = pygame.mixer.Sound(
+    os.path.join(constants.MUSIC_PATH, "line.ogg"))
+line_sound.set_volume(0.1)
+gameover_sound = pygame.mixer.Sound(
+    os.path.join(constants.MUSIC_PATH, "gameover.ogg"))
 pygame.init()
 clock = pygame.time.Clock()
 screen: pygame.Surface = pygame.display.set_mode(constants.SIZE)
@@ -153,6 +163,7 @@ class Game:
         for i in range(constants.COLUMNS):
             self.board[row][i].kill()
             self.board[row][i] = 0
+        line_sound.play()
         del self.board[row]
         self.score += constants.COLUMNS
         if self.score % constants.LINE_PER_LEVEL == 0:
@@ -194,7 +205,7 @@ class Game:
         constants.BOMBS_INTERVALS = int(interval)
         global CURRENT_BOMB_INTERVAL
         CURRENT_BOMB_INTERVAL = constants.BOMBS_INTERVALS
-        pygame.time.set_timer(BOMBGENERATE, CURRENT_BOMB_INTERVAL)
+        pygame.time.set_timer(BOMBGENERATE, 0)
         Tile.reset_v()
 
     # игровой цикл стартового экрана
@@ -212,9 +223,9 @@ class Game:
                      ).fetchall()]
         difficult_state = pygame_gui.elements.ui_selection_list.UISelectionList(
             relative_rect=pygame.Rect(
-                (constants.SCREEN_WIDTH // 4 - 110,
-                 1.5 * constants.SCREEN_HEIGHT // 4),
-                (200, 110)
+                (constants.SCREEN_WIDTH // 4 - 50,
+                 1.5 * constants.SCREEN_HEIGHT // 4 + 5),
+                (100, 108)
             ),
             item_list=item_list,
             manager=manager
@@ -261,25 +272,25 @@ class Game:
                 constants.SCREEN_HEIGHT
             )
         )
-        screen.blit(fon, (0, 0))
-        font = pygame.font.Font(None, 35)
-        string_rendered = font.render('Коробочки', True, pygame.Color('white'))
-        intro_rect = string_rendered.get_rect()
-        intro_rect.centerx = constants.SCREEN_WIDTH // 2
-        intro_rect.y = 10
-        screen.blit(string_rendered, intro_rect)
-        font = pygame.font.Font(None, 25)
-        text_coord: int = 30
-        for line in intro_text:
-            string_rendered = font.render(line, True, pygame.Color('white'))
-            intro_rect = string_rendered.get_rect()
-            text_coord += 5
-            intro_rect.top = text_coord
-            intro_rect.x = 10
-            text_coord += intro_rect.height
-            screen.blit(string_rendered, intro_rect)
 
         while True:
+            screen.blit(fon, (0, 0))
+            font = pygame.font.Font(None, 35)
+            string_rendered = font.render('Коробочки', True, pygame.Color('white'))
+            intro_rect = string_rendered.get_rect()
+            intro_rect.centerx = constants.SCREEN_WIDTH // 2
+            intro_rect.y = 10
+            screen.blit(string_rendered, intro_rect)
+            font = pygame.font.Font(None, 25)
+            text_coord: int = 30
+            for line in intro_text:
+                string_rendered = font.render(line, True, pygame.Color('white'))
+                intro_rect = string_rendered.get_rect()
+                text_coord += 5
+                intro_rect.top = text_coord
+                intro_rect.x = 10
+                text_coord += intro_rect.height
+                screen.blit(string_rendered, intro_rect)
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     terminate()
@@ -287,11 +298,12 @@ class Game:
                     if event.user_type == pygame_gui.UI_BUTTON_PRESSED:
                         if event.ui_element == start_button:
                             self.set_difficult(difficult_state.get_single_selection())
+                            main_theme.play(loops=-1)
+                            main_theme.set_volume(0.1)
                             self.is_start_screen = False
                             return
                         if event.ui_element == results_button:
-                            # self.is_start_screen = False
-                            return
+                            self.result_screen()
                         if event.ui_element == exit_button:
                             terminate()
                 manager.process_events(event)
@@ -438,8 +450,9 @@ class Game:
                             self.reset_game()
                             return
                         if event.ui_element == results_button:
-                            # TODO: показать результаты
-                            return
+                            self.result_screen()
+                            screen.fill('black')
+                            screen.blit(fon, (x, y))
                         if event.ui_element == exit_button:
                             terminate()
                 manager.process_events(event)
@@ -463,7 +476,76 @@ class Game:
             pygame.display.flip()
             clock.tick(constants.FPS)
 
+    # игровой цикл стартового экрана
+    def result_screen(self) -> None:
+        """
+        Запускает игровой цикл для отрисовки стартового окна
+        :return:
+        """
+        screen_result = pygame.display.set_mode(constants.SIZE)
+        manager: pygame_gui.UIManager = pygame_gui.UIManager(constants.SIZE)
+        item_list = ['Name    Score    Level    Difficult    Total']
+        item_list += [''.join([str(x).ljust(13, ' ') for x in difficult_name[1:]]) for difficult_name in
+                     self.con.cursor().execute(
+                         'SELECT * '
+                         'FROM records '
+                         'ORDER BY total DESC '
+                         'LIMIT 7'
+                     ).fetchall()]
+        back_button = pygame_gui.elements.UIButton(
+            relative_rect=pygame.Rect(
+                (constants.SCREEN_WIDTH // 4 - 50,
+                 2.5 * constants.SCREEN_HEIGHT // 4),
+                (100, 50)
+            ),
+            text='Back',
+            manager=manager
+        )
+        exit_button = pygame_gui.elements.UIButton(
+            relative_rect=pygame.Rect(
+                (constants.SCREEN_WIDTH // 4 - 50,
+                 3 * constants.SCREEN_HEIGHT // 4),
+                (100, 50)
+            ),
+            text='Quit',
+            manager=manager
+        )
+        fon: pygame.Surface = pygame.transform.scale(
+            load_image('results.jpg'), (
+                constants.SCREEN_WIDTH,
+                constants.SCREEN_HEIGHT
+            )
+        )
+        screen_result.blit(fon, (0, 0))
+        font = pygame.font.Font(None, 25)
+        text_coord: int = 100
+        for line in item_list:
+            string_rendered = font.render(line, True, pygame.Color('white'))
+            intro_rect = string_rendered.get_rect()
+            text_coord += 5
+            intro_rect.top = text_coord
+            intro_rect.x = 100
+            text_coord += intro_rect.height
+            screen_result.blit(string_rendered, intro_rect)
+        while True:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    terminate()
+                if event.type == pygame.USEREVENT:
+                    if event.user_type == pygame_gui.UI_BUTTON_PRESSED:
+                        if event.ui_element == back_button:
+                            return
+                        if event.ui_element == exit_button:
+                            screen_result.quit()
+                            terminate()
+                manager.process_events(event)
+            manager.update(constants.FPS)
+            manager.draw_ui(screen)
+            pygame.display.flip()
+            clock.tick(constants.FPS)
+
     def reset_game(self):
+        main_theme.stop()
         self.player.kill()
         self.board: List[List[Union[int, Tile]]] = [[0] * constants.COLUMNS
                                                     for _ in
@@ -493,6 +575,8 @@ class Game:
         """
         self.check_game_over()
         if self.is_game_over:
+            main_theme.stop()
+            gameover_sound.play()
             self.game_over_screen()
             return
         if self.is_start_screen:
@@ -619,6 +703,7 @@ class Player(pygame.sprite.Sprite):
                 self.rect.x += constants.STEP
         if keys[pygame.K_UP]:
             if self.is_can_jump():
+                jump_sound.play()
                 self.rect.y -= self.jump
                 self.is_in_air = True
 
@@ -876,6 +961,7 @@ class Tile(pygame.sprite.Sprite):
                 len(pygame.sprite.spritecollide(self, tiles_group, False)) == 1
         ):
             game.player.health -= 1
+            hit_sound.play()
             if game.board[self.row][self.col]:
                 game.board[self.row][self.col] = 0
             self.kill()
@@ -923,12 +1009,7 @@ class Particle(pygame.sprite.Sprite):
 
 keys = pygame.key.get_pressed()
 is_paused = False
-# временный счетчик генерируемых коробок
-count = 1
-# тестовая первая линия
 if __name__ == '__main__':
-    main_theme.play(loops=-1)
-    main_theme.set_volume(0.01)
     while True:
         generation = False
         for event in pygame.event.get():
@@ -939,12 +1020,9 @@ if __name__ == '__main__':
             keys = pygame.key.get_pressed()
             if keys[pygame.K_ESCAPE]:
                 game.is_paused = not game.is_paused
-        if generation and count:
+        if generation:
             col = randrange(1, constants.COLUMNS - 1)
-            # for i in range(11):
-            #     Tile('box', i)
             Tile(color_box[game.level % len(color_box)], col)
-            # count -= 1
         game.update(keys)
         pygame.display.flip()
         clock.tick(constants.FPS)
