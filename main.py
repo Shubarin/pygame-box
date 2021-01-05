@@ -536,7 +536,6 @@ class Game:
                         if event.ui_element == back_button:
                             return
                         if event.ui_element == exit_button:
-                            screen_result.quit()
                             terminate()
                 manager.process_events(event)
             manager.update(constants.FPS)
