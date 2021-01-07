@@ -13,27 +13,32 @@ import inputbox
 
 # инициализация констант
 pygame.mixer.init()
-main_theme = pygame.mixer.Sound(
+sound_main_theme: pygame.mixer.Sound = pygame.mixer.Sound(
     os.path.join(constants.MUSIC_PATH, "main_theme.ogg"))
-jump_sound = pygame.mixer.Sound(
+
+sound_jump: pygame.mixer.Sound = pygame.mixer.Sound(
     os.path.join(constants.MUSIC_PATH, "jump.ogg"))
-jump_sound.set_volume(0.1)
-hit_sound = pygame.mixer.Sound(
+sound_jump.set_volume(0.1)
+
+sound_hit: pygame.mixer.Sound = pygame.mixer.Sound(
     os.path.join(constants.MUSIC_PATH, "hit.ogg"))
-hit_sound.set_volume(0.1)
-line_sound = pygame.mixer.Sound(
+sound_hit.set_volume(0.1)
+
+sound_line: pygame.mixer.Sound = pygame.mixer.Sound(
     os.path.join(constants.MUSIC_PATH, "line.ogg"))
-line_sound.set_volume(0.1)
-gameover_sound = pygame.mixer.Sound(
+sound_line.set_volume(0.1)
+
+sound_gameover: pygame.mixer.Sound = pygame.mixer.Sound(
     os.path.join(constants.MUSIC_PATH, "gameover.ogg"))
 pygame.init()
-clock = pygame.time.Clock()
+clock: pygame.time.Clock = pygame.time.Clock()
 screen: pygame.Surface = pygame.display.set_mode(constants.SIZE)
 
 screen_game_over: pygame.Surface = pygame.display.set_mode(constants.SIZE)
-pygame.key.set_repeat(200, 70)
 BOMBGENERATE: pygame.event = pygame.USEREVENT + 1
+# интервал будет уменьшаться с ростом скорости и уровня
 CURRENT_BOMB_INTERVAL = constants.BOMBS_INTERVALS
+pygame.key.set_repeat(200, 70)
 
 
 # Генерация частиц
@@ -84,7 +89,6 @@ game_status = pygame.sprite.Group()
 tiles_group = pygame.sprite.Group()
 player_group = pygame.sprite.Group()
 
-tile_images: dict = {'box': load_image('box.png')}
 color_box = [
     'box-black.png',
     'box-blue.png',
@@ -114,39 +118,54 @@ class Game:
             :param: player: Player
             :param: board: List[List[Union[int, Tile]]]
             :param: game_over_screen: GameOver
-            :param: health_status: List[StatusHearts]
+            :param: status_health: List[StatusHearts]
+            :param: is_game_over: bool
             :param: is_paused: bool
         Методы:
             check_line - проверяет нет ли на поле полностью заполненных линий
-            delete_row - проводит удаление строки со смещением всех объектов
             check_game_over - проверяет окончание игры
+            delete_row - проводит удаление строки со смещением всех объектов
+            reset_game - cбрасывает игру на начальные настройки перед рестартом
+            set_difficult - Настраивает игровой процесс
+                            в соответствии с уровнем сложности
+            screen_game_over - игровой цикл экрана конца игры
+            screen_pause - игровой цикл экрана паузы
+            screen_result - игровой цикл экрана результатов
+            screen_start - игровой цикл стартового экрана
+            update - метод для обновления состояния игры
     """
 
     def __init__(self):
-        self.player: Player = Player(load_image("dragon.png"), 8, 2, 50, 50)
         self.board: List[List[Union[int, Tile]]] = [[0] * constants.COLUMNS
                                                     for _ in
                                                     range(constants.ROWS)]
-        self.health_status: List[StatusHearts] = [StatusHearts() for _ in
-                                                  range(self.player.health)]
-        self.score_status: StatusScore = StatusScore()
-        self.score_level: StatusLevel = StatusLevel()
-        self.score: int = 0
+        self.con: sqlite3.connect = sqlite3.connect(constants.DB_NAME)
+        self.difficult_id = None
         self.level: int = 0
-        for i, obj in enumerate(self.health_status):
-            obj.rect.x = obj.rect.width * i * 0.5
-            obj.rect.y = 10
         self.is_game_over: bool = False
         self.is_paused: bool = False
         self.is_start_screen: bool = True
-        self.difficult_id = None
-        self.con = sqlite3.connect(constants.DB_NAME)
+        self.player: Player = Player(load_image("dragon.png"), 8, 2)
+        self.score: int = 0
+        self.status_health: List[StatusHearts] = [StatusHearts() for _ in
+                                                  range(self.player.health)]
+        self.status_score: StatusScore = StatusScore()
+        self.status_level: StatusLevel = StatusLevel()
+        # размещаем жизни на экране
+        for i, obj in enumerate(self.status_health):
+            obj.rect.x = obj.rect.width * i * 0.5
+            obj.rect.y = 10
 
-    def check_line(self, *args, **kwargs) -> None:
+    def check_game_over(self) -> None:
+        """
+        Проверка состояния игры на окончание
+        :return:
+        """
+        self.is_game_over = any(self.board[1]) or not self.player.health
+
+    def check_line(self) -> None:
         """
         Если в строке все элементы заполнены, то строка удаляется
-        :param args:
-        :param kwargs:
         :return:
         """
         for i, row in enumerate(self.board):
@@ -163,7 +182,7 @@ class Game:
         for i in range(constants.COLUMNS):
             self.board[row][i].kill()
             self.board[row][i] = 0
-        line_sound.play()
+        sound_line.play()
         del self.board[row]
         self.score += constants.COLUMNS
         if self.score % constants.LINE_PER_LEVEL == 0:
@@ -174,7 +193,8 @@ class Game:
             line = []
             for tile in self.board[r]:
                 if tile:
-                    tile.rect.y = constants.tile_height * r - constants.DOWN_BORDER
+                    tile.rect.y = constants.tile_height * r - \
+                                  constants.DOWN_BORDER
                 line.append(tile)
             new_board.append(line)
         # добавляем пустую верхнюю строку
@@ -183,16 +203,36 @@ class Game:
         for r in new_board:
             self.board.append(r)
 
-    def check_game_over(self, *args, **kwargs) -> None:
+    def reset_game(self) -> None:
         """
-        Проверка состояния игры на окончание
-        :param args:
-        :param kwargs:
-        :return:
+        Сбрасывает игру на начальные настройки перед рестартом
+        :return None:
         """
-        self.is_game_over = any(self.board[1]) or not self.player.health
+        sound_main_theme.stop()
+        self.player.kill()
+        self.board: List[List[Union[int, Tile]]] = [[0] * constants.COLUMNS
+                                                    for _ in
+                                                    range(constants.ROWS)]
+        for obj in self.status_health:
+            obj.kill()
+        self.status_score.kill()
+        self.status_level.kill()
+        self.score: int = 0
+        self.level: int = 0
+        for i, obj in enumerate(self.status_health):
+            obj.rect.x = obj.rect.width * i * 0.5
+            obj.rect.y = 10
+        for obj in tiles_group:
+            obj.kill()
+        Tile.reset_v()
+        self.__init__()
 
-    def set_difficult(self, difficult_name):
+    def set_difficult(self, difficult_name) -> None:
+        """
+        Настраивает игровой процесс в соответствии с уровнем сложности
+        :param difficult_name: str
+        :return None:
+        """
         difficult_name = difficult_name or constants.DEFAULT_DIFFICULT
         cur = self.con.cursor()
         difficult_line = cur.execute(
@@ -200,7 +240,7 @@ class Game:
             'FROM difficult '
             f'WHERE difficult_name="{difficult_name}" '
         ).fetchone()
-        self.difficult_id, _, start_v, interval =  difficult_line
+        self.difficult_id, _, start_v, interval = difficult_line
         constants.START_V = start_v
         constants.BOMBS_INTERVALS = int(interval)
         global CURRENT_BOMB_INTERVAL
@@ -208,197 +248,11 @@ class Game:
         pygame.time.set_timer(BOMBGENERATE, 0)
         Tile.reset_v()
 
-    # игровой цикл стартового экрана
-    def start_screen(self) -> None:
-        """
-        Запускает игровой цикл для отрисовки стартового окна
-        :return:
-        """
-        manager: pygame_gui.UIManager = pygame_gui.UIManager(constants.SIZE)
-        item_list = [difficult_name[0] for difficult_name in
-                     self.con.cursor().execute(
-                         'SELECT difficult_name '
-                         'FROM difficult '
-                         'ORDER BY id ASC'
-                     ).fetchall()]
-        difficult_state = pygame_gui.elements.ui_selection_list.UISelectionList(
-            relative_rect=pygame.Rect(
-                (constants.SCREEN_WIDTH // 4 - 50,
-                 1.5 * constants.SCREEN_HEIGHT // 4 + 5),
-                (100, 108)
-            ),
-            item_list=item_list,
-            manager=manager
-        )
-        start_button = pygame_gui.elements.UIButton(
-            relative_rect=pygame.Rect(
-                (constants.SCREEN_WIDTH // 4 - 50,
-                 2.5 * constants.SCREEN_HEIGHT // 4),
-                (100, 50)
-            ),
-            text='Start',
-            manager=manager
-        )
-        results_button = pygame_gui.elements.UIButton(
-            relative_rect=pygame.Rect(
-                (constants.SCREEN_WIDTH // 4 - 50,
-                 3 * constants.SCREEN_HEIGHT // 4),
-                (100, 50)
-            ),
-            text='Results',
-            manager=manager
-        )
-        exit_button = pygame_gui.elements.UIButton(
-            relative_rect=pygame.Rect(
-                (constants.SCREEN_WIDTH // 4 - 50,
-                 3.5 * constants.SCREEN_HEIGHT // 4),
-                (100, 50)
-            ),
-            text='Quit',
-            manager=manager
-        )
-        intro_text: list = [
-            'Правила игры:',
-            'С неба сбрасывают коробки. Герой должен расставлять',
-            'их в линию, чтобы не дать вырасти столбикам до неба.',
-            'При попадании по персонажу коробкой теряются жизни',
-            '','',
-            '      Уровень сложности:'
-        ]
-
-        fon: pygame.Surface = pygame.transform.scale(
-            load_image('background-start.jpg'), (
-                constants.SCREEN_WIDTH,
-                constants.SCREEN_HEIGHT
-            )
-        )
-
-        while True:
-            screen.blit(fon, (0, 0))
-            font = pygame.font.Font(None, 35)
-            string_rendered = font.render('Коробочки', True, pygame.Color('white'))
-            intro_rect = string_rendered.get_rect()
-            intro_rect.centerx = constants.SCREEN_WIDTH // 2
-            intro_rect.y = 10
-            screen.blit(string_rendered, intro_rect)
-            font = pygame.font.Font(None, 25)
-            text_coord: int = 30
-            for line in intro_text:
-                string_rendered = font.render(line, True, pygame.Color('white'))
-                intro_rect = string_rendered.get_rect()
-                text_coord += 5
-                intro_rect.top = text_coord
-                intro_rect.x = 10
-                text_coord += intro_rect.height
-                screen.blit(string_rendered, intro_rect)
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    terminate()
-                if event.type == pygame.USEREVENT:
-                    if event.user_type == pygame_gui.UI_BUTTON_PRESSED:
-                        if event.ui_element == start_button:
-                            self.set_difficult(difficult_state.get_single_selection())
-                            main_theme.play(loops=-1)
-                            main_theme.set_volume(0.1)
-                            self.is_start_screen = False
-                            return
-                        if event.ui_element == results_button:
-                            self.result_screen()
-                        if event.ui_element == exit_button:
-                            terminate()
-                manager.process_events(event)
-            manager.update(constants.FPS)
-            manager.draw_ui(screen)
-            pygame.display.flip()
-            clock.tick(constants.FPS)
-
-    # игровой цикл экрана паузы
-    def pause_screen(self) -> None:
-        """
-        Запускает игровой цикл для отрисовки стартового окна
-        :return:
-        """
-        manager: pygame_gui.UIManager = pygame_gui.UIManager(constants.SIZE)
-        restart_button = pygame_gui.elements.UIButton(
-            relative_rect=pygame.Rect(
-                (constants.SCREEN_WIDTH // 4 - 50,
-                 2.5 * constants.SCREEN_HEIGHT // 4),
-                (100, 50)
-            ),
-            text='Restart',
-            manager=manager
-        )
-        resume_button = pygame_gui.elements.UIButton(
-            relative_rect=pygame.Rect(
-                (constants.SCREEN_WIDTH // 4 - 50,
-                 3 * constants.SCREEN_HEIGHT // 4),
-                (100, 50)
-            ),
-            text='Resume',
-            manager=manager
-        )
-        exit_button = pygame_gui.elements.UIButton(
-            relative_rect=pygame.Rect(
-                (constants.SCREEN_WIDTH // 4 - 50,
-                 3.5 * constants.SCREEN_HEIGHT // 4),
-                (100, 50)
-            ),
-            text='Quit',
-            manager=manager
-        )
-        intro_text: list = [
-            'Пауза', '',
-            f'Score: {self.score}',
-            f'Осталось жизней: {len(self.health_status)}',
-        ]
-
-        fon: pygame.Surface = pygame.transform.scale(
-            load_image('background-start.jpg'), (
-                constants.SCREEN_WIDTH,
-                constants.SCREEN_HEIGHT
-            )
-        )
-        screen.blit(fon, (0, 0))
-        font = pygame.font.Font(None, 35)
-        text_coord: int = 50
-        for line in intro_text:
-            string_rendered = font.render(line, True, pygame.Color('white'))
-            intro_rect = string_rendered.get_rect()
-            text_coord += 10
-            intro_rect.top = text_coord
-            intro_rect.x = 10
-            text_coord += intro_rect.height
-            screen.blit(string_rendered, intro_rect)
-
-        while True:
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    terminate()
-                if event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_ESCAPE:
-                        self.is_paused = False
-                        return
-                if event.type == pygame.USEREVENT:
-                    if event.user_type == pygame_gui.UI_BUTTON_PRESSED:
-                        if event.ui_element == restart_button:
-                            self.reset_game()
-                            return
-                        if event.ui_element == resume_button:
-                            self.is_paused = False
-                            return
-                        if event.ui_element == exit_button:
-                            terminate()
-                manager.process_events(event)
-            manager.update(constants.FPS)
-            manager.draw_ui(screen)
-            pygame.display.flip()
-            clock.tick(constants.FPS)
-
     # игровой цикл экрана конца игры
-    def game_over_screen(self) -> None:
+    def screen_game_over(self) -> None:
         """
-        Запускает игровой цикл для отрисовки стартового окна
-        :return:
+        Запускает игровой цикл для отрисовки окна проигрыша
+        :return None:
         """
         manager: pygame_gui.UIManager = pygame_gui.UIManager(constants.SIZE)
 
@@ -450,7 +304,7 @@ class Game:
                             self.reset_game()
                             return
                         if event.ui_element == results_button:
-                            self.result_screen()
+                            self.screen_result()
                             screen.fill('black')
                             screen.blit(fon, (x, y))
                         if event.ui_element == exit_button:
@@ -466,7 +320,8 @@ class Game:
                     cur = self.con.cursor()
                     cur.execute(
                         'INSERT INTO records(name, score, level, difficult_id, total) '
-                        'VALUES(?, ?, ?, ?, ?)', (name, self.score, self.level, self.difficult_id, total)
+                        'VALUES(?, ?, ?, ?, ?)',
+                        (name, self.score, self.level, self.difficult_id, total)
                     )
                     self.con.commit()
                 manager.update(constants.FPS)
@@ -476,22 +331,106 @@ class Game:
             pygame.display.flip()
             clock.tick(constants.FPS)
 
-    # игровой цикл стартового экрана
-    def result_screen(self) -> None:
+    # игровой цикл экрана паузы
+    def screen_pause(self) -> None:
         """
-        Запускает игровой цикл для отрисовки стартового окна
-        :return:
+        Запускает игровой цикл для отрисовки окна паузы
+        :return None:
+        """
+        manager: pygame_gui.UIManager = pygame_gui.UIManager(constants.SIZE)
+        restart_button = pygame_gui.elements.UIButton(
+            relative_rect=pygame.Rect(
+                (constants.SCREEN_WIDTH // 4 - 50,
+                 2.5 * constants.SCREEN_HEIGHT // 4),
+                (100, 50)
+            ),
+            text='Restart',
+            manager=manager
+        )
+        resume_button = pygame_gui.elements.UIButton(
+            relative_rect=pygame.Rect(
+                (constants.SCREEN_WIDTH // 4 - 50,
+                 3 * constants.SCREEN_HEIGHT // 4),
+                (100, 50)
+            ),
+            text='Resume',
+            manager=manager
+        )
+        exit_button = pygame_gui.elements.UIButton(
+            relative_rect=pygame.Rect(
+                (constants.SCREEN_WIDTH // 4 - 50,
+                 3.5 * constants.SCREEN_HEIGHT // 4),
+                (100, 50)
+            ),
+            text='Quit',
+            manager=manager
+        )
+        intro_text: list = [
+            'Пауза', '',
+            f'Score: {self.score}',
+            f'Осталось жизней: {len(self.status_health)}',
+        ]
+
+        fon: pygame.Surface = pygame.transform.scale(
+            load_image('background-start.jpg'), (
+                constants.SCREEN_WIDTH,
+                constants.SCREEN_HEIGHT
+            )
+        )
+        screen.blit(fon, (0, 0))
+        font = pygame.font.Font(None, 35)
+        text_coord: int = 50
+        for line in intro_text:
+            string_rendered = font.render(line, True, pygame.Color('white'))
+            intro_rect = string_rendered.get_rect()
+            text_coord += 10
+            intro_rect.top = text_coord
+            intro_rect.x = 10
+            text_coord += intro_rect.height
+            screen.blit(string_rendered, intro_rect)
+
+        while True:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    terminate()
+                if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_ESCAPE:
+                        self.is_paused = False
+                        return
+                if event.type == pygame.USEREVENT:
+                    if event.user_type == pygame_gui.UI_BUTTON_PRESSED:
+                        if event.ui_element == restart_button:
+                            self.reset_game()
+                            return
+                        if event.ui_element == resume_button:
+                            self.is_paused = False
+                            return
+                        if event.ui_element == exit_button:
+                            terminate()
+                manager.process_events(event)
+            manager.update(constants.FPS)
+            manager.draw_ui(screen)
+            pygame.display.flip()
+            clock.tick(constants.FPS)
+
+    # игровой цикл экрана результатов
+    def screen_result(self) -> None:
+        """
+        Запускает игровой цикл для отрисовки окна результатов
+        :return None:
         """
         screen_result = pygame.display.set_mode(constants.SIZE)
         manager: pygame_gui.UIManager = pygame_gui.UIManager(constants.SIZE)
         item_list = ['Name    Score    Level    Difficult    Total']
-        item_list += [''.join([str(x).ljust(13, ' ') for x in difficult_name[1:]]) for difficult_name in
-                     self.con.cursor().execute(
-                         'SELECT * '
-                         'FROM records '
-                         'ORDER BY total DESC '
-                         'LIMIT 7'
-                     ).fetchall()]
+        item_list += [
+            ''.join([str(x).ljust(13, ' ') for x in difficult_name[1:]]) for
+            difficult_name in
+            self.con.cursor().execute(
+                'SELECT * '
+                'FROM records '
+                'ORDER BY total DESC '
+                'LIMIT 7'
+            ).fetchall()]
         back_button = pygame_gui.elements.UIButton(
             relative_rect=pygame.Rect(
                 (constants.SCREEN_WIDTH // 4 - 50,
@@ -543,46 +482,132 @@ class Game:
             pygame.display.flip()
             clock.tick(constants.FPS)
 
-    def reset_game(self):
-        main_theme.stop()
-        self.player.kill()
-        self.board: List[List[Union[int, Tile]]] = [[0] * constants.COLUMNS
-                                                    for _ in
-                                                    range(constants.ROWS)]
-        for obj in self.health_status:
-            obj.kill()
-        self.score_status.kill()
-        self.score_level.kill()
-        self.score: int = 0
-        self.level: int = 0
-        for i, obj in enumerate(self.health_status):
-            obj.rect.x = obj.rect.width * i * 0.5
-            obj.rect.y = 10
-        for obj in tiles_group:
-            obj.kill()
-        Tile.reset_v()
-        self.__init__()
+    # игровой цикл стартового экрана
+    def screen_start(self) -> None:
+        """
+        Запускает игровой цикл для отрисовки стартового окна
+        :return None:
+        """
+        manager: pygame_gui.UIManager = pygame_gui.UIManager(constants.SIZE)
+        item_list = [difficult_name[0] for difficult_name in
+                     self.con.cursor().execute(
+                         'SELECT difficult_name '
+                         'FROM difficult '
+                         'ORDER BY id ASC'
+                     ).fetchall()]
+        difficult_state = pygame_gui.elements.ui_selection_list.UISelectionList(
+            relative_rect=pygame.Rect(
+                (constants.SCREEN_WIDTH // 4 - 50,
+                 1.5 * constants.SCREEN_HEIGHT // 4 + 5),
+                (100, 108)
+            ),
+            item_list=item_list,
+            manager=manager
+        )
+        start_button = pygame_gui.elements.UIButton(
+            relative_rect=pygame.Rect(
+                (constants.SCREEN_WIDTH // 4 - 50,
+                 2.5 * constants.SCREEN_HEIGHT // 4),
+                (100, 50)
+            ),
+            text='Start',
+            manager=manager
+        )
+        results_button = pygame_gui.elements.UIButton(
+            relative_rect=pygame.Rect(
+                (constants.SCREEN_WIDTH // 4 - 50,
+                 3 * constants.SCREEN_HEIGHT // 4),
+                (100, 50)
+            ),
+            text='Results',
+            manager=manager
+        )
+        exit_button = pygame_gui.elements.UIButton(
+            relative_rect=pygame.Rect(
+                (constants.SCREEN_WIDTH // 4 - 50,
+                 3.5 * constants.SCREEN_HEIGHT // 4),
+                (100, 50)
+            ),
+            text='Quit',
+            manager=manager
+        )
+        intro_text: list = [
+            'Правила игры:',
+            'С неба сбрасывают коробки. Герой должен расставлять',
+            'их в линию, чтобы не дать вырасти столбикам до неба.',
+            'При попадании по персонажу коробкой теряются жизни',
+            '', '',
+            '      Уровень сложности:'
+        ]
+
+        fon: pygame.Surface = pygame.transform.scale(
+            load_image('background-start.jpg'), (
+                constants.SCREEN_WIDTH,
+                constants.SCREEN_HEIGHT
+            )
+        )
+
+        while True:
+            screen.blit(fon, (0, 0))
+            font = pygame.font.Font(None, 35)
+            string_rendered = font.render('Коробочки', True,
+                                          pygame.Color('white'))
+            intro_rect = string_rendered.get_rect()
+            intro_rect.centerx = constants.SCREEN_WIDTH // 2
+            intro_rect.y = 10
+            screen.blit(string_rendered, intro_rect)
+            font = pygame.font.Font(None, 25)
+            text_coord: int = 30
+            for line in intro_text:
+                string_rendered = font.render(line, True, pygame.Color('white'))
+                intro_rect = string_rendered.get_rect()
+                text_coord += 5
+                intro_rect.top = text_coord
+                intro_rect.x = 10
+                text_coord += intro_rect.height
+                screen.blit(string_rendered, intro_rect)
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    terminate()
+                if event.type == pygame.USEREVENT:
+                    if event.user_type == pygame_gui.UI_BUTTON_PRESSED:
+                        if event.ui_element == start_button:
+                            self.set_difficult(
+                                difficult_state.get_single_selection())
+                            sound_main_theme.play(loops=-1)
+                            sound_main_theme.set_volume(0.1)
+                            self.is_start_screen = False
+                            return
+                        if event.ui_element == results_button:
+                            self.screen_result()
+                        if event.ui_element == exit_button:
+                            terminate()
+                manager.process_events(event)
+            manager.update(constants.FPS)
+            manager.draw_ui(screen)
+            pygame.display.flip()
+            clock.tick(constants.FPS)
 
     def update(self, keys: [bool] = None, *args, **kwargs) -> None:
         """
         Отрисовка игрового мира
         :parameter
-        :param keys: Sequence [bool
+        :param keys: Sequence [bool]
         :param args:
         :param kwargs:
-        :return:
+        :return None:
         """
         self.check_game_over()
         if self.is_game_over:
-            main_theme.stop()
-            gameover_sound.play()
-            self.game_over_screen()
+            sound_main_theme.stop()
+            sound_gameover.play()
+            self.screen_game_over()
             return
         if self.is_start_screen:
-            self.start_screen()
+            self.screen_start()
             return
         if self.is_paused:
-            self.pause_screen()
+            self.screen_pause()
             return
         fon = pygame.transform.scale(load_image('background.png'),
                                      (constants.SCREEN_WIDTH,
@@ -618,16 +643,18 @@ class Player(pygame.sprite.Sprite):
             :param: health: int
     """
 
-    def __init__(self, sheet, columns, rows, x, y):
+    def __init__(self, sheet, columns, rows):
         super().__init__(player_group, all_sprites)
         self.frames = []
         self.cut_sheet(sheet, columns, rows)
         self.cur_frame: int = 0
-        self.count_animate: int = 4  # количество циклов повторений анимации на экран
+        # количество циклов повторений анимации на экран
+        self.count_animate: int = 4
         self.image: pygame.Surface = self.frames[self.cur_frame]
         self.rect = self.rect.move(
             screen.get_rect().centerx - self.image.get_width() // 2,
-            screen.get_rect().bottom - self.image.get_height() - constants.DOWN_BORDER)
+            screen.get_rect().bottom - self.image.get_height() - constants.DOWN_BORDER
+        )
         self.v: int = 1  # скорость
         self.gravity: float = constants.GRAVITY
         self.is_flip: bool = False
@@ -635,6 +662,7 @@ class Player(pygame.sprite.Sprite):
         self.jump: float = 1.5 * constants.tile_height
         self.col, self.row = self.get_coords()
         self.health: int = 10
+        self.mask = pygame.mask.from_surface(self.image)
 
     def cut_sheet(self, sheet, columns, rows):
         self.rect = pygame.Rect(0, 0, sheet.get_width() // columns,
@@ -656,7 +684,7 @@ class Player(pygame.sprite.Sprite):
         :return: tuple[int, int]
         """
         return self.rect.x * constants.COLUMNS // constants.SCREEN_WIDTH, \
-               self.rect.y * constants.ROWS // constants.SCREEN_HEIGHT
+            self.rect.y * constants.ROWS // constants.SCREEN_HEIGHT
 
     def is_can_jump(self) -> bool:
         """
@@ -678,8 +706,10 @@ class Player(pygame.sprite.Sprite):
         Проверяет возможность пойти направо
         :return: bool
         """
-        right_col = (self.rect.centerx + self.rect.width // 4) * \
-                    constants.COLUMNS // constants.SCREEN_WIDTH
+        right_col = (
+                (self.rect.centerx + self.rect.width // 4) *
+                constants.COLUMNS // constants.SCREEN_WIDTH
+        )
         return (self.col + 1 < constants.COLUMNS and
                 self.rect.right < constants.SCREEN_WIDTH and
                 not game.board[self.row][right_col])
@@ -702,7 +732,7 @@ class Player(pygame.sprite.Sprite):
                 self.rect.x += constants.STEP
         if keys[pygame.K_UP]:
             if self.is_can_jump():
-                jump_sound.play()
+                sound_jump.play()
                 self.rect.y -= self.jump
                 self.is_in_air = True
 
@@ -736,8 +766,10 @@ class StatusHearts(pygame.sprite.Sprite):
     def __init__(self):
         super().__init__(game_status)
         self.image = load_image("heart.png", color_key=-1)
-        self.image = pygame.transform.scale(self.image, (self.image.get_width(),
-                                                         self.image.get_height()))
+        self.image = pygame.transform.scale(
+            self.image, (self.image.get_width(),
+                         self.image.get_height())
+        )
         self.rect = self.image.get_rect()
 
 
@@ -825,7 +857,7 @@ class Tile(pygame.sprite.Sprite):
         :return: tuple[int, int]
         """
         return self.rect.x * constants.COLUMNS // constants.SCREEN_WIDTH, \
-               self.rect.y * constants.ROWS // constants.SCREEN_HEIGHT
+            self.rect.y * constants.ROWS // constants.SCREEN_HEIGHT
 
     def is_can_move_left(self) -> bool:
         is_can = (
@@ -953,19 +985,20 @@ class Tile(pygame.sprite.Sprite):
         if args:
             self.move(args[0])
         # Проверка что не упали на героя
-        if (self.is_hero_collide_bottom and
+        if (
+                self.is_hero_collide_bottom and
                 not self.is_hero_collide_left and
                 not self.is_hero_collide_right and
                 not self.is_hero_collide_top and
                 len(pygame.sprite.spritecollide(self, tiles_group, False)) == 1
         ):
             game.player.health -= 1
-            hit_sound.play()
+            sound_hit.play()
             if game.board[self.row][self.col]:
                 game.board[self.row][self.col] = 0
             self.kill()
             create_particles((self.rect.centerx, self.rect.top))
-            game.health_status.pop().kill()
+            game.status_health.pop().kill()
         if self.sprite_copy.rect.colliderect(
                 constants.screen_rect) and not self.is_collide_bottom:
             self.rect.y += self.v
