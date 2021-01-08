@@ -92,6 +92,7 @@ gameover_group = pygame.sprite.Group()
 game_status = pygame.sprite.Group()
 tiles_group = pygame.sprite.Group()
 player_group = pygame.sprite.Group()
+cursor_group = pygame.sprite.Group()
 
 color_box = [
     'box-black.png',
@@ -311,6 +312,10 @@ class Game:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     terminate()
+                if event.type == pygame.MOUSEMOTION:
+                    x_, y_ = event.pos
+                    cursor.rect.x = x_
+                    cursor.rect.y = y_
                 if event.type == pygame.USEREVENT:
                     if event.user_type == pygame_gui.UI_BUTTON_PRESSED:
                         if event.ui_element == restart_button:
@@ -318,18 +323,24 @@ class Game:
                             return
                         if event.ui_element == results_button:
                             self.screen_result()
-                            screen.fill('black')
                             screen.blit(fon, (x, y))
                         if event.ui_element == exit_button:
                             terminate()
                 manager.process_events(event)
             if x + fon.get_width() >= constants.SCREEN_WIDTH:
                 speed = 0
-                if not name:
+                total = self.score * self.difficult_id
+                minimum_cur = self.con.cursor()
+                current_minimum_top = minimum_cur.execute(
+                    'SELECT MIN(total) '
+                    'FROM records '
+                    'ORDER BY total '
+                    'LIMIT 7'
+                ).fetchone()[0]
+                if not name and total > current_minimum_top:
                     name = inputbox.ask(screen, 'Your name')
                     if not name:
                         continue
-                    total = self.score * self.difficult_id
                     cur = self.con.cursor()
                     cur.execute(
                         'INSERT INTO records(name, score, level, difficult_id, total) '
@@ -341,6 +352,14 @@ class Game:
                 manager.draw_ui(screen)
             x += speed
             screen.blit(fon, (x, y))
+            if (
+                    fon.get_rect().y + 100 < cursor.rect.y < 380 or
+                    restart_button.rect.collidepoint(cursor.rect.center) or
+                    results_button.rect.collidepoint(cursor.rect.center) or
+                    exit_button.rect.collidepoint(cursor.rect.center)
+            ) and pygame.mouse.get_focused():
+                cursor_group.draw(screen)
+                cursor_group.update()
             pygame.display.flip()
             clock.tick(constants.FPS)
 
@@ -390,22 +409,25 @@ class Game:
                 constants.SCREEN_HEIGHT
             )
         )
-        screen.blit(fon, (0, 0))
-        font = pygame.font.Font(None, 35)
-        text_coord: int = 50
-        for line in intro_text:
-            string_rendered = font.render(line, True, pygame.Color('white'))
-            intro_rect = string_rendered.get_rect()
-            text_coord += 10
-            intro_rect.top = text_coord
-            intro_rect.x = 10
-            text_coord += intro_rect.height
-            screen.blit(string_rendered, intro_rect)
-
         while True:
+            screen.blit(fon, (0, 0))
+            font = pygame.font.Font(None, 35)
+            text_coord: int = 50
+            for line in intro_text:
+                string_rendered = font.render(line, True, pygame.Color('white'))
+                intro_rect = string_rendered.get_rect()
+                text_coord += 10
+                intro_rect.top = text_coord
+                intro_rect.x = 10
+                text_coord += intro_rect.height
+                screen.blit(string_rendered, intro_rect)
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     terminate()
+                if event.type == pygame.MOUSEMOTION:
+                    x, y = event.pos
+                    cursor.rect.x = x
+                    cursor.rect.y = y
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_ESCAPE:
                         self.is_paused = False
@@ -423,6 +445,9 @@ class Game:
                 manager.process_events(event)
             manager.update(constants.FPS)
             manager.draw_ui(screen)
+            if pygame.mouse.get_focused():
+                cursor_group.draw(screen)
+                cursor_group.update()
             pygame.display.flip()
             clock.tick(constants.FPS)
 
@@ -453,10 +478,19 @@ class Game:
             text='Back',
             manager=manager
         )
-        exit_button = pygame_gui.elements.UIButton(
+        clear_button = pygame_gui.elements.UIButton(
             relative_rect=pygame.Rect(
                 (constants.SCREEN_WIDTH // 4,
                  3 * constants.SCREEN_HEIGHT // 4),
+                (100, 50)
+            ),
+            text='Clear',
+            manager=manager
+        )
+        exit_button = pygame_gui.elements.UIButton(
+            relative_rect=pygame.Rect(
+                (constants.SCREEN_WIDTH // 4,
+                 3.5 * constants.SCREEN_HEIGHT // 4),
                 (100, 50)
             ),
             text='Quit',
@@ -480,18 +514,56 @@ class Game:
             text_coord += intro_rect.height
             screen_result.blit(string_rendered, intro_rect)
         while True:
+            screen.fill('black')
+            screen_result.blit(fon, (0, 0))
+            font = pygame.font.Font(None, 25)
+            text_coord: int = 100
+            for line in item_list:
+                string_rendered = font.render(line, True, pygame.Color('white'))
+                intro_rect = string_rendered.get_rect()
+                text_coord += 5
+                intro_rect.top = text_coord
+                intro_rect.x = 150
+                text_coord += intro_rect.height
+                screen_result.blit(string_rendered, intro_rect)
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     terminate()
+                if event.type == pygame.MOUSEMOTION:
+                    x, y = event.pos
+                    cursor.rect.x = x
+                    cursor.rect.y = y
                 if event.type == pygame.USEREVENT:
                     if event.user_type == pygame_gui.UI_BUTTON_PRESSED:
                         if event.ui_element == back_button:
                             return
+                        if event.ui_element == clear_button:
+                            pygame_gui.windows.UIConfirmationDialog(
+                                rect=pygame.Rect(
+                                    constants.SCREEN_WIDTH // 2 - 130,
+                                    constants.SCREEN_HEIGHT // 2 - 100,
+                                    260, 200),
+                                manager=manager,
+                                action_long_desc='Вы действительно '
+                                                 'хотите очистить базу данных?',
+                                window_title='Удалить все записи?'
+                            )
+                        if event.ui_object_id == '#confirmation_dialog.#confirm_button':
+                            item_list = [
+                                'Name    Score    Level    Difficult    Total']
+                            self.con.cursor().execute(
+                                'DELETE FROM records'
+                            ).connection.commit()
+                        if event.ui_object_id == '#confirmation_dialog.#cancel_button':
+                            pass
                         if event.ui_element == exit_button:
                             terminate()
                 manager.process_events(event)
             manager.update(constants.FPS)
             manager.draw_ui(screen)
+            if pygame.mouse.get_focused():
+                cursor_group.draw(screen)
+                cursor_group.update()
             pygame.display.flip()
             clock.tick(constants.FPS)
 
@@ -582,6 +654,10 @@ class Game:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     terminate()
+                if event.type == pygame.MOUSEMOTION:
+                    x, y = event.pos
+                    cursor.rect.x = x
+                    cursor.rect.y = y
                 if event.type == pygame.USEREVENT:
                     if event.user_type == pygame_gui.UI_BUTTON_PRESSED:
                         if event.ui_element == start_button:
@@ -598,6 +674,9 @@ class Game:
                 manager.process_events(event)
             manager.update(constants.FPS)
             manager.draw_ui(screen)
+            if pygame.mouse.get_focused():
+                cursor_group.draw(screen)
+                cursor_group.update()
             pygame.display.flip()
             clock.tick(constants.FPS)
 
@@ -661,12 +740,12 @@ class Player(pygame.sprite.Sprite):
         self.cut_sheet(sheet, columns, rows)
         self.cur_frame: int = 0
         self.gravity: float = constants.GRAVITY
-        self.health: int = 10
+        self.health: int = constants.HEALTHS
         self.image: pygame.Surface = self.frames[self.cur_frame]
         self.is_flip: bool = False  # статус разворота спрайта
         self.is_in_air: bool = False  # статус прыжка
         self.jump: float = 1.5 * constants.tile_height
-        self.mask : pygame.mask = pygame.mask.from_surface(self.image)
+        self.mask: pygame.mask = pygame.mask.from_surface(self.image)
         self.rect = self.rect.move(
             screen.get_rect().centerx - self.image.get_width() // 2,
             screen.get_rect().bottom - self.image.get_height() - constants.DOWN_BORDER
@@ -701,7 +780,7 @@ class Player(pygame.sprite.Sprite):
         :return: tuple[int, int]
         """
         return self.rect.x * constants.COLUMNS // constants.SCREEN_WIDTH, \
-            self.rect.y * constants.ROWS // constants.SCREEN_HEIGHT
+               self.rect.y * constants.ROWS // constants.SCREEN_HEIGHT
 
     def is_can_jump(self) -> bool:
         """
@@ -783,6 +862,7 @@ class StatusHearts(pygame.sprite.Sprite):
     """
     Класс отвечающий за отрисовку жизни
     """
+
     def __init__(self):
         super().__init__(game_status)
         self.image: pygame.Surface = load_image("heart.png", color_key=-1)
@@ -797,6 +877,7 @@ class StatusScore(pygame.sprite.Sprite):
     """
     Класс отвечающий за отрисовку набранных очков
     """
+
     def __init__(self):
         super().__init__(game_status)
         self.font: pygame.font.Font = pygame.font.Font(None, 30)
@@ -817,6 +898,7 @@ class StatusLevel(pygame.sprite.Sprite):
     """
     Класс отвечающий за отрисовку текущего уровня
     """
+
     def __init__(self):
         super().__init__(game_status)
         self.font: pygame.font.Font = pygame.font.Font(None, 30)
@@ -913,7 +995,7 @@ class Tile(pygame.sprite.Sprite):
         :return tuple[int, int]:
         """
         return self.rect.x * constants.COLUMNS // constants.SCREEN_WIDTH, \
-            self.rect.y * constants.ROWS // constants.SCREEN_HEIGHT
+               self.rect.y * constants.ROWS // constants.SCREEN_HEIGHT
 
     def have_bottom_collide(self, obj: pygame.sprite.Sprite) -> None:
         """
@@ -1143,7 +1225,7 @@ class Particle(pygame.sprite.Sprite):
 
     def __init__(self, pos, dx, dy):
         super().__init__(all_sprites, player_group)
-        self.image: pygame.Surface= choice(self.fire)
+        self.image: pygame.Surface = choice(self.fire)
         self.rect = self.image.get_rect()
         self.velocity = [dx, dy]
         self.rect.x, self.rect.y = pos
@@ -1157,14 +1239,23 @@ class Particle(pygame.sprite.Sprite):
             self.kill()
 
 
+cursor = pygame.sprite.Sprite(cursor_group)
+cursor.image = load_image("arrow.png")
+cursor.rect = cursor.image.get_rect()
+
 keys = pygame.key.get_pressed()
 is_paused = False
 if __name__ == '__main__':
+    pygame.mouse.set_visible(False)
     while True:
         generation = False
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 terminate()
+            if event.type == pygame.MOUSEMOTION:
+                x, y = event.pos
+                cursor.rect.x = x
+                cursor.rect.y = y
             if event.type == BOMBGENERATE and not is_paused:
                 generation = True
             keys = pygame.key.get_pressed()

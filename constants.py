@@ -19,3 +19,4 @@ MUSIC_PATH = os.path.join('data', 'music')
 DB_NAME = os.path.join('data', 'db.db')
 DEFAULT_DIFFICULT = 'Средне'
 MARGIN_STATUS = 25
+HEALTHS = 10
