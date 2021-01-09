@@ -308,6 +308,8 @@ class Game:
             manager=manager
         )
         name = None
+        que = 'INSERT INTO records(name, score, level, difficult_id, total) ' \
+              'VALUES(?, ?, ?, ?, ?)'
         while True:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
@@ -343,8 +345,7 @@ class Game:
                         continue
                     cur = self.con.cursor()
                     cur.execute(
-                        'INSERT INTO records(name, score, level, difficult_id, total) '
-                        'VALUES(?, ?, ?, ?, ?)',
+                        que,
                         (name, self.score, self.level, self.difficult_id, total)
                     )
                     self.con.commit()
@@ -480,6 +481,8 @@ class Game:
                 'ORDER BY total DESC '
                 'LIMIT 7'
             ).fetchall()]
+        cancel_button_text = '#confirmation_dialog.#cancel_button'
+        confirm_button_text = '#confirmation_dialog.#confirm_button'
         back_button = pygame_gui.elements.UIButton(
             relative_rect=pygame.Rect(
                 (constants.SCREEN_WIDTH // 4,
@@ -559,13 +562,13 @@ class Game:
                                                  'хотите очистить базу данных?',
                                 window_title='Удалить все записи?'
                             )
-                        if event.ui_object_id == '#confirmation_dialog.#confirm_button':
+                        if event.ui_object_id == confirm_button_text:
                             item_list = [
                                 'Name    Score    Level    Difficult    Total']
                             self.con.cursor().execute(
                                 'DELETE FROM records'
                             ).connection.commit()
-                        if event.ui_object_id == '#confirmation_dialog.#cancel_button':
+                        if event.ui_object_id == cancel_button_text:
                             pass
                         if event.ui_element == exit_button:
                             terminate()
@@ -803,7 +806,9 @@ class Player(pygame.sprite.Sprite):
         self.mask: pygame.mask = pygame.mask.from_surface(self.image)
         self.rect = self.rect.move(
             screen.get_rect().centerx - self.image.get_width() // 2,
-            screen.get_rect().bottom - self.image.get_height() - constants.DOWN_BORDER
+            (screen.get_rect().bottom -
+             self.image.get_height() -
+             constants.DOWN_BORDER)
         )
         self.col, self.row = self.get_coords()
         self.v: int = 1  # скорость
@@ -835,7 +840,7 @@ class Player(pygame.sprite.Sprite):
         :return: tuple[int, int]
         """
         return self.rect.x * constants.COLUMNS // constants.SCREEN_WIDTH, \
-               self.rect.y * constants.ROWS // constants.SCREEN_HEIGHT
+            self.rect.y * constants.ROWS // constants.SCREEN_HEIGHT
 
     def is_can_jump(self) -> bool:
         """
@@ -1050,7 +1055,7 @@ class Tile(pygame.sprite.Sprite):
         :return tuple[int, int]:
         """
         return self.rect.x * constants.COLUMNS // constants.SCREEN_WIDTH, \
-               self.rect.y * constants.ROWS // constants.SCREEN_HEIGHT
+            self.rect.y * constants.ROWS // constants.SCREEN_HEIGHT
 
     def have_bottom_collide(self, obj: pygame.sprite.Sprite) -> None:
         """
