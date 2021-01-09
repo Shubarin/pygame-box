@@ -24,10 +24,16 @@ MARGIN_STATUS = 25
 HEALTHS = 10
 
 # Настройка управления
-UP_KEY = pygame.K_SPACE
 RIGHT_KEY = pygame.K_RIGHT
 LEFT_KEY = pygame.K_LEFT
-def setup_controller():
+UP_KEY = pygame.K_SPACE
+
+
+def setup_controller() -> None:
+    """
+    переопределяет кнопки управления
+    :return None:
+    """
     con = sqlite3.connect(DB_NAME)
     cur = con.cursor()
     keys_in_db = cur.execute(
@@ -36,6 +42,7 @@ def setup_controller():
         'ORDER BY id'
     ).fetchall()
     global UP_KEY, RIGHT_KEY, LEFT_KEY
-    UP_KEY = keys_in_db[2][0]
     RIGHT_KEY = keys_in_db[0][0]
     LEFT_KEY = keys_in_db[1][0]
+    UP_KEY = keys_in_db[2][0]
+
