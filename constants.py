@@ -1,4 +1,6 @@
 import os
+import pygame
+import sqlite3
 
 SIZE = SCREEN_WIDTH, SCREEN_HEIGHT = 550, 500
 tile_width = tile_height = 50
@@ -13,10 +15,27 @@ ERROR_RATE = 35
 LINE_PER_LEVEL = 3
 START_V = 15
 BOMBS_INTERVALS = 500
-INSTERVALS_PITCH = 500
+INSTERVALS_PITCH = 200
 IMAGES_PATH = os.path.join('data', 'images')
 MUSIC_PATH = os.path.join('data', 'music')
 DB_NAME = os.path.join('data', 'db.db')
 DEFAULT_DIFFICULT = 'Средне'
 MARGIN_STATUS = 25
 HEALTHS = 10
+
+# Настройка управления
+UP_KEY = pygame.K_SPACE
+RIGHT_KEY = pygame.K_RIGHT
+LEFT_KEY = pygame.K_LEFT
+def setup_controller():
+    con = sqlite3.connect(DB_NAME)
+    cur = con.cursor()
+    keys_in_db = cur.execute(
+        'SELECT key '
+        'FROM controller '
+        'ORDER BY id'
+    ).fetchall()
+    global UP_KEY, RIGHT_KEY, LEFT_KEY
+    UP_KEY = keys_in_db[2][0]
+    RIGHT_KEY = keys_in_db[0][0]
+    LEFT_KEY = keys_in_db[1][0]

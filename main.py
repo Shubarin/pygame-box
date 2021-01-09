@@ -52,9 +52,9 @@ def create_particles(position: [int, int]) -> None:
     :param position: [int, int]
     :return None:
     """
-    particle_count = 20
+    particle_count = 5
     # возможные скорости
-    numbers = range(-5, 6)
+    numbers = range(-1, 3)
     for _ in range(particle_count):
         Particle(position, choice(numbers), choice(numbers))
 
@@ -370,6 +370,15 @@ class Game:
         :return None:
         """
         manager: pygame_gui.UIManager = pygame_gui.UIManager(constants.SIZE)
+        control_button = pygame_gui.elements.UIButton(
+            relative_rect=pygame.Rect(
+                (3 * constants.SCREEN_WIDTH // 4 - 50,
+                 3.5 * constants.SCREEN_HEIGHT // 4),
+                (150, 50)
+            ),
+            text='Setup controller',
+            manager=manager
+        )
         restart_button = pygame_gui.elements.UIButton(
             relative_rect=pygame.Rect(
                 (constants.SCREEN_WIDTH // 4 - 50,
@@ -434,6 +443,8 @@ class Game:
                         return
                 if event.type == pygame.USEREVENT:
                     if event.user_type == pygame_gui.UI_BUTTON_PRESSED:
+                        if event.ui_element == control_button:
+                            self.screen_setup_control()
                         if event.ui_element == restart_button:
                             self.reset_game()
                             return
@@ -567,6 +578,39 @@ class Game:
             pygame.display.flip()
             clock.tick(constants.FPS)
 
+    def screen_setup_control(self):
+        control_image = {
+            'control-right.jpg': constants.RIGHT_KEY,
+            'control-left.jpg': constants.LEFT_KEY,
+            'control-jump.jpg': constants.UP_KEY,
+        }
+        for filename, const_key in control_image.items():
+            fon: pygame.Surface = pygame.transform.scale(
+                load_image(filename), (
+                    constants.SCREEN_WIDTH,
+                    constants.SCREEN_HEIGHT
+                )
+            )
+            running = True
+            while running:
+                screen.fill('black')
+                screen.blit(fon, (0, 0))
+                for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
+                        terminate()
+                    if event.type == pygame.KEYDOWN:
+                        running = False
+                        cur = self.con.cursor()
+                        cur.execute(
+                            'UPDATE controller '
+                            f'SET key={event.key} '
+                            f'WHERE key={const_key}'
+                        )
+                        self.con.commit()
+                pygame.display.flip()
+                clock.tick(constants.FPS)
+        constants.setup_controller()
+
     # игровой цикл стартового экрана
     def screen_start(self) -> None:
         """
@@ -580,6 +624,15 @@ class Game:
                          'FROM difficult '
                          'ORDER BY id ASC'
                      ).fetchall()]
+        control_button = pygame_gui.elements.UIButton(
+            relative_rect=pygame.Rect(
+                (3 * constants.SCREEN_WIDTH // 4 - 50,
+                 3.5 * constants.SCREEN_HEIGHT // 4),
+                (150, 50)
+            ),
+            text='Setup controller',
+            manager=manager
+        )
         difficult_state = pygame_gui.elements.ui_selection_list.UISelectionList(
             relative_rect=pygame.Rect(
                 (constants.SCREEN_WIDTH // 4 - 50,
@@ -669,6 +722,8 @@ class Game:
                             return
                         if event.ui_element == results_button:
                             self.screen_result()
+                        if event.ui_element == control_button:
+                            self.screen_setup_control()
                         if event.ui_element == exit_button:
                             terminate()
                 manager.process_events(event)
@@ -816,17 +871,17 @@ class Player(pygame.sprite.Sprite):
         :param keys: [bool]
         :return:
         """
-        if keys[pygame.K_LEFT]:
+        if keys[constants.LEFT_KEY]:
             if self.is_flip:
                 self.image = pygame.transform.flip(self.image, True, False)
             if self.is_can_move_left():
                 self.rect.x -= constants.STEP
-        if keys[pygame.K_RIGHT]:
+        if keys[constants.RIGHT_KEY]:
             if not self.is_flip:
                 self.image = pygame.transform.flip(self.image, True, False)
             if self.is_can_move_right():
                 self.rect.x += constants.STEP
-        if keys[pygame.K_UP]:
+        if keys[constants.UP_KEY]:
             if self.is_can_jump():
                 sound_jump.play()
                 self.rect.y -= self.jump
@@ -1138,10 +1193,10 @@ class Tile(pygame.sprite.Sprite):
             self.can_move_left = self.is_can_move_left()
             self.can_move_right = self.is_can_move_right()
 
-        if keys[pygame.K_LEFT] and self.can_move_left:
+        if keys[constants.LEFT_KEY] and self.can_move_left:
             self.rect.x -= constants.tile_width
 
-        if keys[pygame.K_RIGHT] and self.can_move_right:
+        if keys[constants.RIGHT_KEY] and self.can_move_right:
             self.rect.x += constants.tile_width
 
     @classmethod
