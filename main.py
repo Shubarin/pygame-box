@@ -2,8 +2,8 @@ import os
 import sqlite3
 import sys
 from copy import copy
-from random import randrange, choice
-from typing import Union, List
+from random import choice, randrange
+from typing import List, Union
 
 import pygame
 import pygame_gui
@@ -336,7 +336,7 @@ class Game:
                 current_minimum_top = minimum_cur.execute(
                     'SELECT MIN(total) '
                     'FROM records '
-                    'ORDER BY total '
+                    'ORDER BY total DESC '
                     'LIMIT 7'
                 ).fetchone()[0]
                 if not name and total > current_minimum_top:
@@ -383,7 +383,7 @@ class Game:
         restart_button = pygame_gui.elements.UIButton(
             relative_rect=pygame.Rect(
                 (constants.SCREEN_WIDTH // 4 - 50,
-                 2.5 * constants.SCREEN_HEIGHT // 4),
+                 3 * constants.SCREEN_HEIGHT // 4),
                 (100, 50)
             ),
             text='Restart',
@@ -392,7 +392,7 @@ class Game:
         resume_button = pygame_gui.elements.UIButton(
             relative_rect=pygame.Rect(
                 (constants.SCREEN_WIDTH // 4 - 50,
-                 3 * constants.SCREEN_HEIGHT // 4),
+                 2.5 * constants.SCREEN_HEIGHT // 4),
                 (100, 50)
             ),
             text='Resume',
@@ -778,6 +778,7 @@ class Player(pygame.sprite.Sprite):
         Методы:
     cut_sheet - раскадровка из карты спрайта
     get_coords - возвращает координаты тайла на игровом поле
+    have_border_down - проверяет есть ли под героем объект или край экрана
     is_can_jump - проверяет возможность прыгнуть вверх
     is_can_move_left - проверяет возможность пойти налево
     is_can_move_right - проверяет возможность пойти направо
@@ -854,21 +855,81 @@ class Player(pygame.sprite.Sprite):
         Проверяет возможность пойти налево
         :return: bool
         """
+        indx = self.rect.collidelist(
+            [tile.rect for tile in tiles_group])
+        ok = False
+        if indx >= 0:
+            collide_tile = [tile.rect for tile in tiles_group][indx]
+            x = self.rect.left - constants.STEP
+            top = self.rect.top - constants.ERROR_RATE
+            y = self.rect.bottom - constants.ERROR_RATE
+            ok = collide_tile.collidepoint(x + constants.STEP, top) or \
+                 collide_tile.collidepoint(x + constants.STEP, y)
         return self.col >= 0 and self.rect.left >= 0 and not \
-            game.board[self.row][self.col]
+            game.board[self.row][self.col] and not ok
 
     def is_can_move_right(self) -> bool:
         """
         Проверяет возможность пойти направо
         :return: bool
         """
+        indx = self.rect.collidelist(
+            [tile.rect for tile in tiles_group])
+        ok = False
+        if indx >= 0:
+            collide_tile = [tile.rect for tile in tiles_group][indx]
+            x = self.rect.right + constants.STEP
+            top = self.rect.top - constants.ERROR_RATE
+            y = self.rect.bottom - constants.ERROR_RATE
+            ok = collide_tile.collidepoint(x + constants.STEP, top) or \
+                 collide_tile.collidepoint(x + constants.STEP, y)
         right_col = (
                 (self.rect.centerx + self.rect.width // 4) *
                 constants.COLUMNS // constants.SCREEN_WIDTH
         )
-        return (self.col + 1 < constants.COLUMNS and
+        return (right_col < constants.COLUMNS and
                 self.rect.right < constants.SCREEN_WIDTH and
-                not game.board[self.row][right_col])
+                not game.board[self.row][right_col] and
+                not ok)
+
+    def have_border_down(self) -> bool:
+        """
+        Проверяет есть ли под героем объект или край экрана
+        :return: bool
+        """
+        move_rect = copy(self.rect)
+        move_rect.bottom += self.v + self.gravity
+        indx = move_rect.collidelist(
+            [tile.rect for tile in tiles_group])
+        ok = False
+        if indx >= 0:
+            collide_tile = [tile.rect for tile in tiles_group][indx]
+            x = move_rect.centerx
+            y = move_rect.bottom
+            ok = collide_tile.collidepoint(x, y + self.v + self.gravity)
+        return ok or not self.rect.colliderect(constants.screen_rect)
+
+    def have_border_up(self) -> int:
+        """
+        Проверяет есть ли над героем объект
+        :return: bool
+        """
+        move_rect = copy(self.rect)
+        tmp = move_rect.top
+        indx = 0
+        while move_rect.top != tmp + self.jump:
+            indx = move_rect.collidelist(
+                [tile.rect for tile in tiles_group])
+            move_rect.top += 1
+            if indx >= 0:
+                break
+        ok = -1
+        if indx >= 0:
+            collide_tile = [tile.rect for tile in tiles_group][indx]
+            x = move_rect.centerx
+            y = move_rect.top
+            ok = collide_tile.collidepoint(x, y)
+        return ok
 
     def move(self, keys: [bool]) -> None:
         """
@@ -877,13 +938,11 @@ class Player(pygame.sprite.Sprite):
         :return:
         """
         if keys[constants.LEFT_KEY]:
-            if self.is_flip:
-                self.image = pygame.transform.flip(self.image, True, False)
+            self.is_flip = False
             if self.is_can_move_left():
                 self.rect.x -= constants.STEP
         if keys[constants.RIGHT_KEY]:
-            if not self.is_flip:
-                self.image = pygame.transform.flip(self.image, True, False)
+            self.is_flip = True
             if self.is_can_move_right():
                 self.rect.x += constants.STEP
         if keys[constants.UP_KEY]:
@@ -891,6 +950,12 @@ class Player(pygame.sprite.Sprite):
                 sound_jump.play()
                 self.rect.y -= self.jump
                 self.is_in_air = True
+                if self.have_border_up() >= 0:
+                    collide_tiles = pygame.sprite.spritecollide(self,
+                                                                tiles_group,
+                                                                False)
+                    if len(collide_tiles) >= 1:
+                            collide_tiles[0].hit_player()
 
     def update(self, *args, **kwargs) -> None:
         """
@@ -902,15 +967,20 @@ class Player(pygame.sprite.Sprite):
         self.cur_frame = (self.rect.x * constants.COLUMNS * 4 //
                           constants.SCREEN_WIDTH) % len(self.frames)
         self.image = self.frames[self.cur_frame]
+        if self.is_flip:
+            self.image = pygame.transform.flip(self.image, True, False)
         self.mask = pygame.mask.from_surface(self.image)
         self.rect.width = constants.tile_width
-        self.rect.height = constants.tile_height + self.v
+        self.rect.height = constants.tile_height
         self.col, self.row = self.get_coords()
         if args:
             self.move(args[0])
-        if self.rect.colliderect(constants.screen_rect) and \
-                not any([pygame.sprite.collide_mask(self, tile) for tile in
-                         tiles_group]):
+        is_collide_mask = any(
+            [pygame.sprite.collide_mask(self, tile) for tile in tiles_group]
+        )
+        if not self.have_border_down() and \
+                (not is_collide_mask or (not self.is_can_move_left() and
+                                         not self.is_can_move_right())):
             self.v += self.gravity
             self.rect.y += self.v
         else:
@@ -1007,6 +1077,7 @@ class Tile(pygame.sprite.Sprite):
     have_left_collide - Проверка что есть объект справа
     have_right_collide - Проверка что есть объект справа
     have_top_collide - Проверка что есть объект сверху
+    hit_player - наносит урон игроку
     increase_speed (@classmethod) - Меняет настройки скорости тайлов и
                                     сбрасывает таймер генерации коробок
     is_can_move_left - проверяет возможность сдвинуть коробку влево
@@ -1113,7 +1184,8 @@ class Tile(pygame.sprite.Sprite):
                 obj.rect.bottom - self.rect.top <= (constants.tile_height +
                                                     constants.ERROR_RATE) and \
                 self.rect.bottom - obj.rect.top <= (constants.tile_height +
-                                                    constants.ERROR_RATE):
+                                                    constants.ERROR_RATE) and \
+                not self.is_hero_collide_bottom:
             if isinstance(obj, Player):
                 self.is_hero_collide_right = True
             else:
@@ -1135,6 +1207,21 @@ class Tile(pygame.sprite.Sprite):
                 self.is_hero_collide_top = True
             else:
                 self.is_collide_top = True
+
+    def hit_player(self) -> None:
+        """
+        наносит урон игроку
+        :return None:
+        """
+        if not self.is_in_air:
+            return
+        game.player.health -= 1
+        sound_hit.play()
+        self.col, self.row = self.get_coords()
+        game.board[self.row][self.col] = 0
+        self.kill()
+        create_particles((self.rect.centerx, self.rect.top))
+        game.status_health.pop().kill()
 
     @classmethod
     def increase_speed(cls) -> None:
@@ -1228,7 +1315,6 @@ class Tile(pygame.sprite.Sprite):
         self.is_hero_collide_left: bool = False
         self.is_hero_collide_top: bool = False
         self.is_hero_collide_bottom: bool = False
-        self.is_in_air = True
 
     def update(self, *args, **kwargs) -> None:
         """
@@ -1249,13 +1335,8 @@ class Tile(pygame.sprite.Sprite):
                 not self.is_hero_collide_top and
                 len(pygame.sprite.spritecollide(self, tiles_group, False)) == 1
         ):
-            game.player.health -= 1
-            sound_hit.play()
-            if game.board[self.row][self.col]:
-                game.board[self.row][self.col] = 0
-            self.kill()
-            create_particles((self.rect.centerx, self.rect.top))
-            game.status_health.pop().kill()
+            self.hit_player()
+
         if self.sprite_copy.rect.colliderect(
                 constants.screen_rect) and not self.is_collide_bottom:
             self.rect.y += self.v
@@ -1263,6 +1344,7 @@ class Tile(pygame.sprite.Sprite):
             new_col, new_row = self.get_coords()
             try:
                 if game.board[new_row][new_col] == 0:
+                    self.is_in_air = False
                     game.board[new_row][new_col], game.board[self.row][
                         self.col] = self, 0
                     self.col, self.row = new_col, new_row
